@@ -10,8 +10,11 @@ TESTS_PASSED=0
 # echo "${BASH_SOURCE[0]}"
 # exit 0
 
-if [ "$Platform" == "Linux" ] ; then
-  exe_search_string='./bin/tests/*';
+if [ "$Platform" == "Linux" ] || [ "$Platform" == "macOS" ] ; then
+  # NOTE(nsillik)(macos): -type f because clang emits a .dSYM bundle directory
+  # next to every binary on macOS, which a bare ./bin/tests/* glob matches and
+  # then tries to execute.
+  exe_search_string='./bin/tests -maxdepth 1 -type f -perm -u+x';
 elif [[ "$Platform" == "Windows" ]] ; then
   # TODO(Jesse): Do we actually need this since switching off VS?  Does clang
   # output pdb files there or something?

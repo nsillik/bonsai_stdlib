@@ -47,6 +47,63 @@ elif [[ "$Platform" == "Windows" ]] ; then
 
   PLATFORM_EXE_EXTENSION=".exe"
   PLATFORM_LIB_EXTENSION=".dll"
+
+elif [[ "$Platform" == "macOS" ]] ; then
+
+  # -lGL fails hard on macOS ("library 'GL' not found"); GL ships inside the
+  # OpenGL framework.  IOKit is required by the AppKit/OpenGL back end.
+  PLATFORM_LINKER_OPTIONS="-framework Cocoa -framework OpenGL -framework IOKit"
+
+  # NOTE(nsillik)(macos): `link_weak` (primitives.h) is `extern "C"
+  # __attribute__((weak))`, which is the ELF rule for "may be undefined; bind to
+  # 0".  ld64 has no equivalent for a main executable: it treats the reference as
+  # a strong undefined symbol and fails the link.  weak_import does not help --
+  # it only relaxes the link against a dylib that *does* define the symbol.
+  #
+  # -U names each hook that a given target is allowed to leave undefined.  This
+  # is deliberately a symbol list rather than -undefined,dynamic_lookup: the
+  # latter disables undefined-symbol checking for the whole link, which would
+  # turn genuine typos and missing libraries into runtime crashes.
+  #
+  # These are the game-supplied hooks the loader and the tools do not implement;
+  # their call sites all null-check first (e.g. `if (EntityUserDataSerialize)`),
+  # so a 0 binding is the intended behaviour.  Adding a new link_weak hook will
+  # produce a link error naming it -- add it here.
+  PLATFORM_LINKER_OPTIONS="$PLATFORM_LINKER_OPTIONS \
+    -Wl,-U,_EntityUserDataSerialize \
+    -Wl,-U,_EntityUserDataDeserialize \
+    -Wl,-U,_EntityUserDataEditorUi \
+    -Wl,-U,_GameEntityUpdate \
+    -Wl,-U,_BindEngineUniform \
+    -Wl,-U,_LaunchWorkerThreads \
+    -Wl,-U,_WorkerThread_BeforeSleep"
+
+  PLATFORM_DEFINES="-D BONSAI_MACOS -D GL_SILENCE_DEPRECATION"
+  PLATFORM_INCLUDE_DIRS="-isysroot $(xcrun --show-sdk-path)"
+
+  # -ggdb is accepted by Apple clang; -g is the native spelling.
+  PLATFORM_CXX_OPTIONS="-g"
+
+  # NOTE(nsillik)(macos): The whole tree is compiled as a single translation unit
+  # per target and platform/macos/macos_platform.cpp uses AppKit directly, so
+  # every target has to be built as Objective-C++ rather than as a separate .mm
+  # shim.
+  PLATFORM_CXX_OPTIONS="$PLATFORM_CXX_OPTIONS -x objective-c++"
+
+  SHARED_LIBRARY_FLAGS="-shared -fPIC"
+
+  PLATFORM_EXE_EXTENSION=""
+  PLATFORM_LIB_EXTENSION=".dylib"
+
+  # NOTE(nsillik): -mssse3 -mavx -mavx2 -mfma live in the shared CXX_OPTIONS
+  # block below, not here, so they are not platform-filterable as written.  On
+  # an arm64 host they hard-error ("unsupported option '-mssse3' for target
+  # 'arm64-apple-darwin'"), so cross-target x86_64 explicitly.  Phase 4 drops
+  # both this flag and those four options once the SIMD layer is NEON-capable.
+  if [ "$ARCH" == "x86_64" ] ; then
+    PLATFORM_CXX_OPTIONS="$PLATFORM_CXX_OPTIONS -target x86_64-apple-macos11"
+  fi
+
 else
   echo "Unsupported Platform ($Platform), exiting." && exit 1
 fi
