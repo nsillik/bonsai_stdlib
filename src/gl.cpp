@@ -193,8 +193,8 @@ InitializeOpenglFunctions()
       GetGL()->Initialized               &= GetGL()->DrawArraysIndirect != 0;
 
       // NOTE(nsillik)(macos): Loaded but deliberately not required.  glMultiDrawArraysIndirect is
-      // GL 4.3 and is absent on macOS' 4.1 core context; MultiDrawIndirect supplies the draw index
-      // to the shader itself and loops glDrawArraysIndirect, so nothing needs this entry point.
+      // GL 4.3 and is absent on macOS' 4.1 core context, and nothing calls it: MultiDrawIndirect
+      // supplies the draw index to the shader itself and issues one direct draw per command.
       GetGL()->MultiDrawArraysIndirect   = (OpenglMultiDrawArraysIndirect)PlatformGetGlFunction("glMultiDrawArraysIndirect");
 
       GetGL()->Clear                     = (OpenglClear)PlatformGetGlFunction("glClear");
