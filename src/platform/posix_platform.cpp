@@ -228,7 +228,11 @@ PlatformCreateThread( thread_main_callback_type ThreadMain, void *Params, s32 Th
   u32 Result = u32(INVALID_THREAD_HANDLE);
   if (Success)
   {
-    Result = u32(Thread);
+    // NOTE(nsillik)(macos): pthread_t is a pointer on macOS and an integer on
+    // Linux, so the direct cast loses precision here.  umm is the codebase's own
+    // pointer-sized integer (CAssert(sizeof(umm) == sizeof(void*)), primitives.h),
+    // so it round-trips the handle on both without pulling in <stdint.h>.
+    Result = u32((umm)Thread);
   }
 
   return Result;
@@ -273,6 +277,17 @@ PlatformSetThreadPriority(s32 Priority)
   bonsai_sched_param Param = {};
   Param.sched_priority = Priority;
 
+#if BONSAI_MACOS
+  // NOTE(nsillik)(macos): sched_setscheduler(2) is Linux-only; pthread_setschedparam
+  // is the portable equivalent.  It returns its error code directly rather than
+  // setting errno, and SCHED_FIFO additionally requires root on macOS, so a
+  // rejection here is expected rather than exceptional.
+  s32 E = pthread_setschedparam(pthread_self(), SCHED_FIFO, &Param);
+  if (E)
+  {
+    Warn("Setting Scheduler for main thread (%s)", strerror(E));
+  }
+#else
   errno = 0;
   s32 E = sched_setscheduler(0, SCHED_FIFO, &Param);
   if (E)
@@ -293,6 +308,7 @@ PlatformSetThreadPriority(s32 Priority)
       InvalidDefaultCase;
     }
   }
+#endif
 
   return;
 }
