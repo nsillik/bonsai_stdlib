@@ -21,6 +21,16 @@
 
 #import <OpenGL/OpenGL.h>
 
+// NOTE(nsillik)(macos): For the kVK_* virtual key codes.  There is no non-Carbon
+// spelling of them, and they are what NSEvent's keyCode reports.
+//
+// This include MUST stay below the Cocoa import above: it transitively includes
+// <MacTypes.h>, which is already include-guarded (and already renamed) by the time
+// Cocoa has been through it.  Moved above the Cocoa import it reintroduces the real
+// `typedef SInt32 Fract`, which breaks maff.h with the same 18 errors the rename
+// exists to prevent.
+#include <Carbon/Carbon.h>
+
 // NOTE(nsillik)(macos): Deliberately <OpenGL/OpenGL.h> and not <OpenGL/gl3.h>.
 // bonsai_stdlib/src/gl.h declares every GL constant and loads every entry point
 // through PlatformGetGlFunction, so the only thing needed here is the
@@ -71,7 +81,12 @@ PlatformGetGlFunction(const char* Name)
   void *Result = dlsym(RTLD_DEFAULT, Name);
   if (!Result)
   {
-    Error("Couldn't load Opengl function (%s)", Name);
+    // NOTE(nsillik)(macos): A 4.1 core context genuinely lacks the 4.3+ entry
+    // points, so a missing symbol is expected here rather than fatal -- and Error()
+    // traps, which would abort the load on the first one and hide the rest.  Which
+    // entry points are required is decided by the `Initialized &= fn != 0` gates in
+    // bonsai_stdlib/src/gl.cpp, and reported in one place there.
+    Warn("Couldn't load Opengl function (%s)", Name);
   }
 
   return Result;

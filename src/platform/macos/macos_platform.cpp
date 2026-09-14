@@ -13,17 +13,116 @@
 // 11.0.
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
 
-@interface BonsaiWindowDelegate : NSObject <NSWindowDelegate>
+// NOTE(nsillik)(macos): Same shape as BindKeydownToInput/BindKeyupToInput in
+// platform.h, but it selects the input field instead of writing it, so one table
+// can serve both keydown and keyup instead of two 60-case switches.
+#define BindMacKeyCode(KeyCode, InputField) case KeyCode: { Field = &Plat->Input.InputField; } break;
+
+link_internal void
+SetInputEvent(input_event *Event, b32 Down)
 {
-@public
-  b32 *ContinueRunning;
+  if (Down)
+  {
+    Event->Clicked = True;
+    Event->Pressed = True;
+  }
+  else
+  {
+    Event->Clicked  = False;
+    Event->Pressed  = False;
+    Event->Released = True;
+  }
+
+  return;
 }
+
+link_internal r32
+BackingScaleFactor(os *Os)
+{
+  r32 Result = (r32)[Os->Window backingScaleFactor];
+  return Result;
+}
+
+// NOTE(nsillik)(macos): ScreenDim is the size of the framebuffer, not the size of
+// the window.  AppKit measures the window in points and the framebuffer in backing
+// pixels, and they differ by the backing scale factor (2 on Retina).  ScreenDim
+// drives SetViewport and both projection matrices, so deriving it from the point
+// size renders at half resolution on Retina and looks correct while doing it.
+// Hence the assertion: it pins the conversion, not the number.
+link_internal void
+UpdateScreenDimFromBacking(os *Os, platform *Plat)
+{
+  NSRect Bounds  = [Os->Display bounds];
+  NSRect Backing = [Os->Display convertRectToBacking:Bounds];
+  r32    Scale   = BackingScaleFactor(Os);
+
+  Assert(Backing.size.width > 0 && Backing.size.height > 0);
+  Assert(Abs(r32(Backing.size.width)  - r32(Bounds.size.width)  * Scale) <= 1.f);
+  Assert(Abs(r32(Backing.size.height) - r32(Bounds.size.height) * Scale) <= 1.f);
+
+  Plat->ScreenDim = V2(r32(Backing.size.width), r32(Backing.size.height));
+  return;
+}
+
+link_internal void
+UpdateMousePosition(os *Os, platform *Plat, NSEvent *Event)
+{
+  // locationInWindow is in window points; convertPoint:fromView:nil maps it into
+  // the view's coordinate space, which is y-up.  X11 and win32 both report the
+  // origin at the top-left, so the y term is flipped -- and everything is scaled
+  // into backing pixels, because MouseP is compared against ScreenDim.
+  NSPoint P     = [Os->Display convertPoint:[Event locationInWindow] fromView:nil];
+  r32     Scale = BackingScaleFactor(Os);
+
+  Plat->MouseP.x = (r32)P.x * Scale;
+  Plat->MouseP.y = Plat->ScreenDim.y - (r32)P.y * Scale;
+  return;
+}
+
+@interface BonsaiWindowDelegate : NSObject <NSWindowDelegate>
 @end
 
 @implementation BonsaiWindowDelegate
+{
+@public
+  os       *Os;
+  platform *Plat;
+}
+
 - (void)windowWillClose:(NSNotification *)Notification
 {
-  if (ContinueRunning) { *ContinueRunning = False; }
+  if (Os) { Os->ContinueRunning = False; }
+}
+
+// NOTE(nsillik)(macos): AppKit runs its own tracking loop on the main thread for
+// the duration of a resize drag, so the game loop -- ProcessOsMessages included --
+// is not running while these fire.  They are still delivered, and they are still
+// delivered on the main thread, which is the only thread permitted to touch the
+// surface.  That is why the resize is handled here rather than by polling in the
+// frame loop, and why the render thread keeps running: it never waits on the main
+// thread, and the only thing they share, the CGL lock, is held for the length of a
+// flush.
+- (void)windowDidResize:(NSNotification *)Notification
+{
+  if (!Os || !Os->GlContext) { return; }
+
+  UpdateScreenDimFromBacking(Os, Plat);
+
+  // -[NSOpenGLContext update] resizes the drawable to match the view.  Without it
+  // the surface keeps whatever size it had when the context was attached, so a
+  // resized window shows a scaled copy of the old size indefinitely.
+  [Os->GlContext update];
+}
+
+// Moving the window between displays with different backing scale factors changes
+// the framebuffer size without changing the window's size in points, so it does
+// not come through windowDidResize.
+- (void)windowDidChangeBackingProperties:(NSNotification *)Notification
+{
+  if (!Os || !Os->GlContext) { return; }
+
+  UpdateScreenDimFromBacking(Os, Plat);
+  [Os->GlContext update];
 }
 @end
 
@@ -73,12 +172,22 @@ OpenAndInitializeWindow(os *Os, platform *Plat, s32 VSyncFrames)
   // NOTE(nsillik): The delegate is retained by the os struct's lifetime, not by
   // the window, because a closed window must not free it out from under us.
   BonsaiWindowDelegate *Delegate = [[BonsaiWindowDelegate alloc] init];
-  Delegate->ContinueRunning = &Os->ContinueRunning;
+  Delegate->Os   = Os;
+  Delegate->Plat = Plat;
   [Window setDelegate:Delegate];
   [Window setReleasedWhenClosed:NO];
   [Window setTitle:@"Bonsai"];
 
+  // Without this the window is never sent mouse-moved events, so MouseP only ever
+  // updates while a button is held and nothing in the UI can be hovered.
+  [Window setAcceptsMouseMovedEvents:YES];
+
   NSView *View = [Window contentView];
+
+  // NOTE(nsillik)(macos): Must be set before the context is attached, because it
+  // is the view that decides whether the surface is sized in points or in backing
+  // pixels.  Set afterwards, the framebuffer stays at half resolution on Retina.
+  [View setWantsBestResolutionOpenGLSurface:YES];
 
   NSOpenGLContext *GlContext = [[NSOpenGLContext alloc] initWithFormat:PixelFormat shareContext:nil];
   if (!GlContext) { Error("Unable to create an NSOpenGLContext"); return False; }
@@ -89,19 +198,16 @@ OpenAndInitializeWindow(os *Os, platform *Plat, s32 VSyncFrames)
   GLint SwapInterval = (VSyncFrames > 0) ? 1 : 0;
   [GlContext setValues:&SwapInterval forParameter:NSOpenGLCPSwapInterval];
 
+  // Assigned before the window is ordered front, because the delegate is live from
+  // here on and the resize callbacks it handles read Os->GlContext.
+  Os->Window    = Window;
+  Os->Display   = View;
+  Os->GlContext = GlContext;
+
   [Window makeKeyAndOrderFront:nil];
   [NSApp activateIgnoringOtherApps:YES];
 
-  Os->Window = Window;
-  Os->Display = View;
-  Os->GlContext = GlContext;
-
-  // NOTE(nsillik)(macos): The framebuffer is in backing pixels while the window is
-  // in points, and they differ by the backing scale factor (2 on Retina).
-  // ScreenDim drives SetViewport, so it must be the backing size.
-  [Os->Display setWantsBestResolutionOpenGLSurface:YES];
-  NSRect BackingBounds = [Os->Display convertRectToBacking:[Os->Display bounds]];
-  Plat->ScreenDim = V2(BackingBounds.size.width, BackingBounds.size.height);
+  UpdateScreenDimFromBacking(Os, Plat);
 
   return True;
 }
@@ -125,13 +231,6 @@ Terminate(os *Os, platform *Plat)
   }
 }
 
-inline r32
-BackingScaleFactor(os *Os)
-{
-  r32 Result = (r32)[Os->Window backingScaleFactor];
-  return Result;
-}
-
 b32
 ProcessOsMessages(os *Os, platform *Plat)
 {
@@ -151,43 +250,142 @@ ProcessOsMessages(os *Os, platform *Plat)
 
     switch ([Event type])
     {
-      case NSEventTypeLeftMouseDown:
-      case NSEventTypeLeftMouseUp:
-      case NSEventTypeRightMouseDown:
-      case NSEventTypeRightMouseUp:
+      case NSEventTypeLeftMouseDown:  { SetInputEvent(&Plat->Input.LMB, True);  } break;
+      case NSEventTypeLeftMouseUp:    { SetInputEvent(&Plat->Input.LMB, False); } break;
+      case NSEventTypeRightMouseDown: { SetInputEvent(&Plat->Input.RMB, True);  } break;
+      case NSEventTypeRightMouseUp:   { SetInputEvent(&Plat->Input.RMB, False); } break;
+
+      // NOTE(nsillik)(macos): NSEventTypeOtherMouse* is every button past the first
+      // two, and buttonNumber 2 is the middle one.  There is no input field for the
+      // extra buttons, and neither win32 nor X11 bind them either.
       case NSEventTypeOtherMouseDown:
+      {
+        if ([Event buttonNumber] == 2) { SetInputEvent(&Plat->Input.MMB, True); }
+      } break;
+
       case NSEventTypeOtherMouseUp:
+      {
+        if ([Event buttonNumber] == 2) { SetInputEvent(&Plat->Input.MMB, False); }
+      } break;
+
+      case NSEventTypeMouseMoved:
       case NSEventTypeLeftMouseDragged:
       case NSEventTypeRightMouseDragged:
       case NSEventTypeOtherMouseDragged:
-      case NSEventTypeMouseMoved:
       {
-        // locationInWindow is in window points; convertPoint:fromView:nil maps
-        // it into the view's coordinate space, which is already y-up.
-        NSPoint P = [Os->Display convertPoint:[Event locationInWindow] fromView:nil];
-        r32 Scale = BackingScaleFactor(Os);
-        NSRect BackingBounds = [Os->Display convertRectToBacking:[Os->Display bounds]];
-
-        Plat->MouseP.x = (r32)P.x * Scale;
-        Plat->MouseP.y = (r32)BackingBounds.size.height - (r32)P.y * Scale;
-
-        // TODO(nsillik)(macos): Mouse buttons.  Needs the input table in
-        // src/engine/input.h; see the NSEventTypeKeyDown TODO below.
+        UpdateMousePosition(Os, Plat, Event);
       } break;
 
       case NSEventTypeScrollWheel:
       {
-        // TODO(nsillik)(macos): scrollWheel -> Plat->MouseDP.
+        // X11 and win32 both report 120 units per wheel notch, and ui.cpp adds the
+        // delta straight to its scroll offset, so a notch has to stay 120 here.  A
+        // wheel reports one line per notch; a trackpad reports points, which are
+        // already the right magnitude.  Positive is scroll-up, as on both other
+        // platforms -- macOS has already applied the user's natural-scrolling
+        // preference to this value.
+        r32 RawDelta = (r32)[Event scrollingDeltaY];
+        s32 Delta    = [Event hasPreciseScrollingDeltas] ? s32(RawDelta) : s32(RawDelta * 120.f);
+
+        // Accumulated rather than assigned: a trackpad emits several scroll events
+        // per frame and the whole queue is drained before anything reads the delta,
+        // so assigning would drop all but the last.  Bonsai_FrameEnd zeroes it
+        // before this pump runs, so it accumulates for exactly one frame.
+        Plat->Input.MouseWheelDelta += Delta;
+      } break;
+
+      case NSEventTypeFlagsChanged:
+      {
+        // NOTE(nsillik)(macos): Modifier keys arrive here and never through
+        // keyDown/keyUp, and modifierFlags is the state of the whole keyboard, so
+        // all three fields come from the one snapshot.
+        NSEventModifierFlags Flags = [Event modifierFlags];
+
+        SetInputEvent(&Plat->Input.Shift, (Flags & NSEventModifierFlagShift)   != 0);
+        SetInputEvent(&Plat->Input.Ctrl,  (Flags & NSEventModifierFlagControl) != 0);
+        SetInputEvent(&Plat->Input.Alt,   (Flags & NSEventModifierFlagOption)  != 0);
       } break;
 
       case NSEventTypeKeyDown:
       case NSEventTypeKeyUp:
       {
-        // TODO(nsillik)(macos): keyCode is physical and layout independent, so it
-        // maps to the input table in src/engine/input.h as a flat table, the
-        // same shape as the two X11 keysym switches in linux_platform.cpp.  The
-        // 63 input fields need an interactively-verified mapping, which is
-        // Phase 2 work.
+        // NOTE(nsillik)(macos): keyCode is a physical, layout-independent HIToolbox
+        // virtual key code -- it does not move when the user switches to Dvorak or
+        // AZERTY -- which is the same property the X11 keysym switches rely on.
+        input_event *Field = 0;
+
+        switch ([Event keyCode])
+        {
+          BindMacKeyCode(kVK_Return, Enter);
+          BindMacKeyCode(kVK_Escape, Escape);
+
+          // The key labelled "delete" above return is a backspace; forward-delete is
+          // a separate key.  Matches VK_BACK/VK_DELETE and XK_BackSpace/XK_Delete.
+          BindMacKeyCode(kVK_Delete,        Backspace);
+          BindMacKeyCode(kVK_ForwardDelete, Delete);
+
+          BindMacKeyCode(kVK_F1,  F1);
+          BindMacKeyCode(kVK_F2,  F2);
+          BindMacKeyCode(kVK_F3,  F3);
+          BindMacKeyCode(kVK_F4,  F4);
+          BindMacKeyCode(kVK_F5,  F5);
+          BindMacKeyCode(kVK_F6,  F6);
+          BindMacKeyCode(kVK_F7,  F7);
+          BindMacKeyCode(kVK_F8,  F8);
+          BindMacKeyCode(kVK_F9,  F9);
+          BindMacKeyCode(kVK_F10, F10);
+          BindMacKeyCode(kVK_F11, F11);
+          BindMacKeyCode(kVK_F12, F12);
+
+          BindMacKeyCode(kVK_ANSI_Period, Dot);
+          BindMacKeyCode(kVK_ANSI_Minus,  Minus);
+          BindMacKeyCode(kVK_ANSI_Slash,  FSlash);
+          BindMacKeyCode(kVK_Space,       Space);
+
+          BindMacKeyCode(kVK_ANSI_0, N0);
+          BindMacKeyCode(kVK_ANSI_1, N1);
+          BindMacKeyCode(kVK_ANSI_2, N2);
+          BindMacKeyCode(kVK_ANSI_3, N3);
+          BindMacKeyCode(kVK_ANSI_4, N4);
+          BindMacKeyCode(kVK_ANSI_5, N5);
+          BindMacKeyCode(kVK_ANSI_6, N6);
+          BindMacKeyCode(kVK_ANSI_7, N7);
+          BindMacKeyCode(kVK_ANSI_8, N8);
+          BindMacKeyCode(kVK_ANSI_9, N9);
+
+          BindMacKeyCode(kVK_ANSI_A, A);
+          BindMacKeyCode(kVK_ANSI_B, B);
+          BindMacKeyCode(kVK_ANSI_C, C);
+          BindMacKeyCode(kVK_ANSI_D, D);
+          BindMacKeyCode(kVK_ANSI_E, E);
+          BindMacKeyCode(kVK_ANSI_F, F);
+          BindMacKeyCode(kVK_ANSI_G, G);
+          BindMacKeyCode(kVK_ANSI_H, H);
+          BindMacKeyCode(kVK_ANSI_I, I);
+          BindMacKeyCode(kVK_ANSI_J, J);
+          BindMacKeyCode(kVK_ANSI_K, K);
+          BindMacKeyCode(kVK_ANSI_L, L);
+          BindMacKeyCode(kVK_ANSI_M, M);
+          BindMacKeyCode(kVK_ANSI_N, N);
+          BindMacKeyCode(kVK_ANSI_O, O);
+          BindMacKeyCode(kVK_ANSI_P, P);
+          BindMacKeyCode(kVK_ANSI_Q, Q);
+          BindMacKeyCode(kVK_ANSI_R, R);
+          BindMacKeyCode(kVK_ANSI_S, S);
+          BindMacKeyCode(kVK_ANSI_T, T);
+          BindMacKeyCode(kVK_ANSI_U, U);
+          BindMacKeyCode(kVK_ANSI_V, V);
+          BindMacKeyCode(kVK_ANSI_W, W);
+          BindMacKeyCode(kVK_ANSI_X, X);
+          BindMacKeyCode(kVK_ANSI_Y, Y);
+          BindMacKeyCode(kVK_ANSI_Z, Z);
+
+          default:
+          {
+          } break;
+        }
+
+        if (Field) { SetInputEvent(Field, [Event type] == NSEventTypeKeyDown); }
       } break;
 
       default:
@@ -208,6 +406,13 @@ BonsaiSwapBuffers(os *Os)
 {
   TIMED_FUNCTION();
 
+  // NOTE(nsillik)(macos): The lock is scoped to the flush instead of being held for
+  // the render thread's whole lifetime.  -[NSOpenGLContext update] takes this same
+  // lock internally (measured: a main-thread update blocks until an off-thread
+  // holder releases it), and update may only be called from the main thread, so a
+  // lock held across frames hangs the first window resize.  Holding it here is all
+  // the mutual exclusion the surface needs: the engine's RenderGate/FrameFence
+  // protocol already serializes the render commands themselves.
   CGLLockContext([Os->GlContext CGLContextObj]);
   [Os->GlContext flushBuffer];
   CGLUnlockContext([Os->GlContext CGLContextObj]);
@@ -216,7 +421,6 @@ BonsaiSwapBuffers(os *Os)
 link_internal void
 PlatformMakeRenderContextCurrent(os *Os)
 {
-  CGLLockContext([Os->GlContext CGLContextObj]);
   [Os->GlContext makeCurrentContext];
 }
 
@@ -227,7 +431,6 @@ PlatformReleaseRenderContext(os *Os)
   // calling thread is the one that made the context current, but the render
   // thread is the only thread that ever calls this.
   [NSOpenGLContext clearCurrentContext];
-  CGLUnlockContext([Os->GlContext CGLContextObj]);
 }
 
 link_internal const char *
