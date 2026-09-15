@@ -2,7 +2,12 @@
 link_internal void
 FramebufferTextureLayer(framebuffer *FBO, texture *Tex, ui_texture_slice Layer)
 {
-  u32 Attachment = FBO->Attachments++;
+  // NOTE(nsillik)(macos): Same counter, same hazard as FramebufferTexture -- see the note
+  // on struct framebuffer.  Zero callers today, fixed so it cannot become one.
+  u32 Attachment = 0;
+  if (!NextFreeFramebufferAttachment(FBO, Tex, &Attachment)) { return; }
+
+  FBO->AttachmentTextureIDs[FBO->Attachments++] = Tex->ID;
   GetGL()->FramebufferTextureLayer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0 + Attachment, Tex->ID, 0, Layer);
   return;
 }

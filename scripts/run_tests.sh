@@ -23,7 +23,10 @@ fi
 
 echo $(pwd)
 for test_executable in $(find $exe_search_string); do
-  if $test_executable $COLORFLAG == 0; then
+  # NOTE(nsillik)(macos): This read $COLORFLAG == 0; the variable is POOF_COLOR_FLAG (preamble.sh)
+  # and the test binaries ignore argv, so the "== 0" was literal junk.  The exit status is what
+  # the branch uses, and is all it needs.
+  if $test_executable $POOF_COLOR_FLAG; then
     TESTS_PASSED=$((TESTS_PASSED+1))
     echo -n ""
   else
@@ -33,7 +36,7 @@ done
 
 if [ "$EXIT_CODE" -eq 0 ]; then
   echo ""
-  echo "All Tests ($TESTES_PASSED) Passed"
+  echo "All Tests ($TESTS_PASSED) Passed"
 elif [ "$EXIT_CODE" -eq 1 ]; then
   echo ""
   echo "$EXIT_CODE Test suite failed. Inspect log for details."

@@ -379,6 +379,20 @@ PrintToStdout(cs Output)
 }
 
 
+link_internal void
+FlushStdout()
+{
+  // NOTE(nsillik)(macos): stdout and stderr are set unbuffered in SetupStdout (console_io.h), but
+  // the log.txt mirror of them is a stdio FILE* and is not, so a trap loses whatever is still in
+  // that buffer.  That reads as "the log stops just short of the crash", which is where the crash
+  // was not.  Win32 writes through WriteFile and has nothing to flush.
+#if !BONSAI_WIN32
+  if (Stdout.Handle) { fflush(Stdout.Handle); }
+  if (Global_StdoutLogfile.Handle) { fflush(Global_StdoutLogfile.Handle); }
+#endif
+}
+
+
 link_internal file_traversal_node
 DeepCopy(heap_allocator *Memory, file_traversal_node *Node)
 {
