@@ -47,6 +47,83 @@ elif [[ "$Platform" == "Windows" ]] ; then
 
   PLATFORM_EXE_EXTENSION=".exe"
   PLATFORM_LIB_EXTENSION=".dll"
+
+elif [[ "$Platform" == "macOS" ]] ; then
+
+  # NOTE(nsillik)(macos): -lGL fails here -- "library 'GL' not found".  OpenGL
+  # ships inside the framework.  Cocoa covers AppKit/Foundation.
+  PLATFORM_LINKER_OPTIONS="-framework Cocoa -framework OpenGL"
+
+  # NOTE(nsillik)(macos): AppKit's OpenGL surface (NSOpenGL*) has been deprecated
+  # since 10.14, every gl* symbol with it, and -[NSApplication
+  # activateIgnoringOtherApps:] since 14.0 -- whose replacement, -[NSApplication
+  # activate], is 14.0 and so is not reachable from a macos11 deployment target.
+  # One flag for the whole class beats a -D plus a #pragma in the source.
+  PLATFORM_DEFINES="-D BONSAI_MACOS"
+
+  # NOTE(nsillik)(macos): -target and not -arch.  The SIMD layer is SSE/AVX-only,
+  # and -mssse3 -mavx -mavx2 -mfma (in the shared CXX_OPTIONS below, which is not
+  # platform-filterable as written) are hard errors for an arm64-apple-darwin
+  # target.  So this cross-targets x86_64 and the result runs under Rosetta 2.
+  # Phase 4 adds NEON and drops both this flag and those four options.
+  #
+  # -x objective-c++ because the engine is one translation unit per target and
+  # platform/macos/macos_platform.cpp uses AppKit directly; there is no separate
+  # .mm shim to put it in.  Objective-C++ is a superset of C++, so the rest of the
+  # tree compiles unchanged.
+  PLATFORM_CXX_OPTIONS="-ggdb -x objective-c++ -target x86_64-apple-macos11"
+
+  # Cross-targeting makes this fire on /usr/local/include once per target.  It
+  # warns that host include directories are unsafe for cross-compilation, which is
+  # exactly what is happening on purpose.
+  PLATFORM_CXX_OPTIONS="$PLATFORM_CXX_OPTIONS -Wno-poison-system-directories -Wno-deprecated-declarations"
+
+  SHARED_LIBRARY_FLAGS="-shared -fPIC"
+
+  # NOTE(nsillik)(macos): `link_weak` (primitives.h) is `extern "C"
+  # __attribute__((weak))` -- the ELF rule for "may be undefined; bind to 0".  ld64 has
+  # no equivalent for a main executable: it treats the reference as a strong undefined
+  # symbol and fails the link.  weak_import does not help either; it only relaxes a link
+  # against a dylib that does define the symbol.
+  #
+  # -U names each symbol a link is allowed to leave undefined, and it has to *stay*
+  # undefined so the dynamic linker can bind it to whatever the loaded game dylib
+  # defines -- which is how these hooks are dispatched on every platform.  A weak
+  # *definition* here would pin the reference to the engine's own copy instead and
+  # silently disable the hook, so it is not an option.
+  #
+  # Every entry is a link_weak symbol that *some* target leaves undefined, which turns on
+  # which translation units that target pulls in rather than on the platform:
+  #
+  #   BindEngineUniform         defined in src/engine/shader.cpp
+  #   LaunchWorkerThreads       defined in bonsai_stdlib/src/work_queue.cpp
+  #     ...and src/engine/engine.cpp includes both, so the test binaries -- which do not
+  #     include it -- are the links that leave them undefined.
+  #   EntityUserData{Serialize,Deserialize,EditorUi}, GameEntityUpdate
+  #     game-supplied hooks; the loader and the tools implement none of them.
+  #   WorkerThread_BeforeSleep  no definition anywhere; its call site null-checks.
+  #
+  # Derived by linking with an empty list and reading ld64's undefined-symbol report over
+  # the whole target set, not by guessing.  The failure mode of a missing entry is a link
+  # error naming the symbol, so the list keeps itself correct.
+  #
+  # Deliberately not -Wl,-undefined,dynamic_lookup, which disables undefined-symbol
+  # checking for the whole link and would turn genuine typos and missing libraries into
+  # runtime crashes.
+  PLATFORM_LINKER_OPTIONS="$PLATFORM_LINKER_OPTIONS \
+    -Wl,-U,_BindEngineUniform \
+    -Wl,-U,_EntityUserDataDeserialize \
+    -Wl,-U,_EntityUserDataEditorUi \
+    -Wl,-U,_EntityUserDataSerialize \
+    -Wl,-U,_GameEntityUpdate \
+    -Wl,-U,_LaunchWorkerThreads \
+    -Wl,-U,_WorkerThread_BeforeSleep"
+
+  PLATFORM_EXE_EXTENSION=""
+  PLATFORM_LIB_EXTENSION=".dylib"
+
+  PLATFORM_INCLUDE_DIRS=""
+
 else
   echo "Unsupported Platform ($Platform), exiting." && exit 1
 fi
