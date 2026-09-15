@@ -74,11 +74,32 @@ FramebufferDepthTexture(texture *Tex)
   GetGL()->FramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, Tex->ID, 0);
 }
 
+link_internal b32
+NextFreeFramebufferAttachment(framebuffer *FBO, texture *Tex, u32 *AttachmentIndex)
+{
+  RangeIterator(Index, FBO->Attachments)
+  {
+    if (FBO->AttachmentTextureIDs[Index] == Tex->ID) { return False; }
+  }
+
+  Assert(FBO->Attachments < ArrayCount(FBO->AttachmentTextureIDs));
+
+  *AttachmentIndex = FBO->Attachments;
+  return True;
+}
+
 link_internal void
 FramebufferTexture(framebuffer *FBO, texture *Tex)
 {
   Assert(Tex->ID != INVALID_TEXTURE_HANDLE);
-  u32 Attachment = FBO->Attachments++;
+
+  // NOTE(nsillik)(macos): Attaching an image that is already attached is a no-op, so
+  // re-pointing a framebuffer at its own texture cannot alias it across two draw buffers.
+  // See the note on struct framebuffer for what that costs on Apple's GL.
+  u32 Attachment = 0;
+  if (!NextFreeFramebufferAttachment(FBO, Tex, &Attachment)) { return; }
+
+  FBO->AttachmentTextureIDs[FBO->Attachments++] = Tex->ID;
   GetGL()->FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0 + Attachment, GL_TEXTURE_2D, Tex->ID, 0);
 }
 

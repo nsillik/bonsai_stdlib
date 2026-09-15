@@ -115,6 +115,11 @@
 
 /* #define GL_PROXY_TEXTURE_2D_ARRAY         0x8C1B */
 /* #define GL_TEXTURE_BINDING_1D_ARRAY       0x8C1C */
+// NOTE(nsillik)(macos): Texture buffer objects.  Core since GL 3.1, so present on
+// macOS' 4.1 core context -- unlike the shader storage buffers they replace, which
+// are 4.3.  A TBO has no layout rules at all (the texel index is the byte offset
+// divided by 16), which is why it can stand in for a std430 buffer read as a struct.
+#define GL_TEXTURE_BUFFER                 0x8C2A
 #define GL_TEXTURE_2D_ARRAY               0x8C1A
 #define GL_TEXTURE_BINDING_2D_ARRAY       0x8C1D
 
@@ -188,6 +193,7 @@
 #define GL_DYNAMIC_STORAGE_BIT            0x0100
 #define GL_STATIC_DRAW                    0x88E4
 #define GL_DRAW_INDIRECT_BUFFER           0x8F3F
+#define GL_CURRENT_PROGRAM                0x8B8D
 
 #define GL_CULL_FACE                      0x0B44
 #define GL_BACK                           0x0405
@@ -351,7 +357,6 @@ DumpGlErrorEnum(u32 ErrorNumber)
 
 typedef const GLubyte*  (*OpenglGetString)                 (GLenum name);
 typedef GLenum          (*OpenglGetError)                  (void);
-typedef void            (*OpenglDebugMessageCallback)      (GLDEBUGPROC callback, const void *userParam);
 typedef void            (*OpenglEnable)                    (GLenum cap);
 typedef void            (*OpenglDisable)                   (GLenum cap);
 typedef void            (*OpenglCullFace)                  (GLenum mode);
@@ -366,7 +371,6 @@ typedef void            (*OpenglClear)                     (GLbitfield mask);
 typedef void            (*OpenglClearColor)                (GLfloat red, GLfloat green, GLfloat blue, GLfloat alpha);
 typedef void            (*OpenglClearDepth)                (GLdouble depth);
 typedef void            (*OpenglGenTextures)               (GLsizei n, GLuint *textures);
-typedef void            (*OpenglBindTextures)              (GLuint first, GLsizei count, const GLuint *textures);
 typedef void            (*OpenglBindTexture)               (GLenum target, GLuint texture);
 typedef void            (*OpenglDeleteTextures)            (GLsizei n, const GLuint *textures);
 typedef void            (*OpenglActiveTexture)             (GLenum texture);
@@ -385,6 +389,7 @@ typedef void            (*OpenglTexParameterf)             (GLenum target, GLenu
 typedef void            (*OpenglTexParameterfv)            (GLenum target, GLenum pname, const GLfloat *params);
 typedef void            (*OpenglTexParameteri)             (GLenum target, GLenum pname, GLint param);
 typedef void            (*OpenglTexParameteriv)            (GLenum target, GLenum pname, const GLint *params);
+typedef void            (*OpenglTexBuffer)                 (GLenum target, GLenum internalformat, GLuint buffer);
 typedef void            (*OpenglCompressedTexImage3D)      (GLenum target, GLint level, GLenum internalformat, GLsizei width, GLsizei height, GLsizei depth, GLint border, GLsizei imageSize, const void *data);
 typedef void            (*OpenglCompressedTexImage2D)      (GLenum target, GLint level, GLenum internalformat, GLsizei width, GLsizei height, GLint border, GLsizei imageSize, const void *data);
 typedef void            (*OpenglCompressedTexImage1D)      (GLenum target, GLint level, GLenum internalformat, GLsizei width, GLint border, GLsizei imageSize, const void *data);
@@ -455,7 +460,6 @@ typedef void            (*OpenglGenBuffers)                (GLsizei n, GLuint *b
 typedef void            (*OpenglGenVertexArrays)           (GLsizei n, GLuint *arrays);
 typedef void            (*OpenglBufferData)                (GLenum target, GLsizeiptr size, const void *data, GLenum usage);
 typedef void            (*OpenglBufferSubData)             (GLenum target, GLintptr offset, GLsizeiptr size, const void *data);
-typedef void            (*OpenglBufferStorage)             (GLenum target, GLsizeiptr size, const void *data, GLbitfield flags);
 typedef void*           (*OpenglMapBuffer)                 (GLenum target, GLenum access);
 typedef void*           (*OpenglMapBufferRange)            (GLenum target, GLintptr offset, GLsizeiptr length,  GLenum access);
 typedef GLboolean       (*OpenglUnmapBuffer)               (GLenum target);
@@ -478,12 +482,10 @@ typedef void (*OpenglGetQueryObjectiv)(GLuint id, GLenum pname, GLint * params);
 typedef void (*OpenglGetQueryObjectuiv)(GLuint id, GLenum pname, GLuint * params);
 typedef void (*OpenglGetQueryObjecti64v)(GLuint id, GLenum pname, GLint64 * params);
 typedef void (*OpenglGetQueryObjectui64v)(GLuint id, GLenum pname, GLuint64 * params);
-typedef void (*OpenglGetQueryBufferObjectiv)(GLuint id, GLuint buffer, GLenum pname, GLintptr offset);
-typedef void (*OpenglGetQueryBufferObjectuiv)(GLuint id, GLuint buffer, GLenum pname, GLintptr offset);
-typedef void (*OpenglGetQueryBufferObjecti64v)(GLuint id, GLuint buffer, GLenum pname, GLintptr offset);
-typedef void (*OpenglGetQueryBufferObjectui64v)(GLuint id, GLuint buffer, GLenum pname, GLintptr offset);
 
 typedef void (*OpenglGenerateTextureMipmap)(GLuint textrue);
+
+typedef void (*OpenglGenerateMipmap)(GLenum target);
 
 
 struct opengl
@@ -492,7 +494,6 @@ struct opengl
 
   OpenglGetString GetString;
   OpenglGetError GetError;
-  OpenglDebugMessageCallback DebugMessageCallback;
   OpenglEnable Enable;
   OpenglDisable Disable;
   OpenglCullFace CullFace;
@@ -505,7 +506,6 @@ struct opengl
   OpenglClearColor ClearColor;
   OpenglClearDepth ClearDepth;
   OpenglGenTextures GenTextures;
-  OpenglBindTextures BindTextures;
   OpenglBindTexture BindTexture;
   OpenglDeleteTextures DeleteTextures;
   OpenglActiveTexture ActiveTexture;
@@ -524,6 +524,7 @@ struct opengl
   OpenglTexParameterfv TexParameterfv;
   OpenglTexParameteri TexParameteri;
   OpenglTexParameteriv TexParameteriv;
+  OpenglTexBuffer TexBuffer;
   OpenglCompressedTexImage3D CompressedTexImage3D;
   OpenglCompressedTexImage2D CompressedTexImage2D;
   OpenglCompressedTexImage1D CompressedTexImage1D;
@@ -594,7 +595,6 @@ struct opengl
   OpenglGenVertexArrays GenVertexArrays;
   OpenglBufferData BufferData;
   OpenglBufferSubData BufferSubData;
-  OpenglBufferStorage BufferStorage;
   OpenglMapBuffer MapBuffer;
   OpenglMapBufferRange MapBufferRange;
   OpenglUnmapBuffer UnmapBuffer;
@@ -618,12 +618,9 @@ struct opengl
   OpenglGetQueryObjectuiv GetQueryObjectuiv;
   OpenglGetQueryObjecti64v GetQueryObjecti64v;
   OpenglGetQueryObjectui64v GetQueryObjectui64v;
-  OpenglGetQueryBufferObjectiv GetQueryBufferObjectiv;
-  OpenglGetQueryBufferObjectuiv GetQueryBufferObjectuiv;
-  OpenglGetQueryBufferObjecti64v GetQueryBufferObjecti64v;
-  OpenglGetQueryBufferObjectui64v GetQueryBufferObjectui64v;
 
   OpenglGenerateTextureMipmap GenerateTextureMipmap;
+  OpenglGenerateMipmap GenerateMipmap;
 
   // Platform specific (wgl / glX)
   /* OpenglSwapInterval SwapInterval; */

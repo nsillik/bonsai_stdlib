@@ -223,7 +223,24 @@ enum shader_language_setting
   ShaderLanguageSetting_460core, // default
   ShaderLanguageSetting_330core, // legacy
   ShaderLanguageSetting_310es,   // web
+  ShaderLanguageSetting_410core, // macOS: the highest version a 4.1 core context accepts
 
   ShaderLanguageSetting_default = ShaderLanguageSetting_460core poof(@string_table_skip),
 };
+
+// NOTE(nsillik)(macos): The language a shader is compiled with when nothing selects
+// one.  macOS only reports GLSL 4.10 from its 4.1 core context, and a rejected
+// #version is fatal -- CheckShaderCompilationStatus calls Error, which traps -- so
+// 460 cannot be the default there.  Everything else keeps 460.
+link_internal shader_language_setting
+DefaultShaderLanguage()
+{
+#if BONSAI_MACOS
+  shader_language_setting Result = ShaderLanguageSetting_410core;
+#else
+  shader_language_setting Result = ShaderLanguageSetting_default;
+#endif
+
+  return Result;
+}
 
