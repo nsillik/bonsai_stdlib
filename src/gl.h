@@ -118,6 +118,12 @@
 #define GL_TEXTURE_2D_ARRAY               0x8C1A
 #define GL_TEXTURE_BINDING_2D_ARRAY       0x8C1D
 
+// NOTE(nsillik)(macos): Texture buffer objects.  Core since GL 3.1, so present on the 4.1
+// core context macOS caps at -- unlike the shader storage buffers they stand in for, which
+// are 4.3.  A TBO has no layout rules at all (texel N is bytes [16N, 16N+16)), which is why
+// it can carry a std430 struct read back with texelFetch.
+#define GL_TEXTURE_BUFFER                 0x8C2A
+
 
 #define GL_RED                            0x1903
 #define GL_RED_INTEGER                    0x8D94
@@ -188,6 +194,7 @@
 #define GL_DYNAMIC_STORAGE_BIT            0x0100
 #define GL_STATIC_DRAW                    0x88E4
 #define GL_DRAW_INDIRECT_BUFFER           0x8F3F
+#define GL_CURRENT_PROGRAM                0x8B8D
 
 #define GL_CULL_FACE                      0x0B44
 #define GL_BACK                           0x0405
@@ -385,6 +392,7 @@ typedef void            (*OpenglTexParameterf)             (GLenum target, GLenu
 typedef void            (*OpenglTexParameterfv)            (GLenum target, GLenum pname, const GLfloat *params);
 typedef void            (*OpenglTexParameteri)             (GLenum target, GLenum pname, GLint param);
 typedef void            (*OpenglTexParameteriv)            (GLenum target, GLenum pname, const GLint *params);
+typedef void            (*OpenglTexBuffer)                 (GLenum target, GLenum internalformat, GLuint buffer);
 typedef void            (*OpenglCompressedTexImage3D)      (GLenum target, GLint level, GLenum internalformat, GLsizei width, GLsizei height, GLsizei depth, GLint border, GLsizei imageSize, const void *data);
 typedef void            (*OpenglCompressedTexImage2D)      (GLenum target, GLint level, GLenum internalformat, GLsizei width, GLsizei height, GLint border, GLsizei imageSize, const void *data);
 typedef void            (*OpenglCompressedTexImage1D)      (GLenum target, GLint level, GLenum internalformat, GLsizei width, GLint border, GLsizei imageSize, const void *data);
@@ -485,6 +493,8 @@ typedef void (*OpenglGetQueryBufferObjectui64v)(GLuint id, GLuint buffer, GLenum
 
 typedef void (*OpenglGenerateTextureMipmap)(GLuint textrue);
 
+typedef void (*OpenglGenerateMipmap)(GLenum target);
+
 
 struct opengl
 {
@@ -524,6 +534,7 @@ struct opengl
   OpenglTexParameterfv TexParameterfv;
   OpenglTexParameteri TexParameteri;
   OpenglTexParameteriv TexParameteriv;
+  OpenglTexBuffer TexBuffer;
   OpenglCompressedTexImage3D CompressedTexImage3D;
   OpenglCompressedTexImage2D CompressedTexImage2D;
   OpenglCompressedTexImage1D CompressedTexImage1D;
@@ -624,6 +635,7 @@ struct opengl
   OpenglGetQueryBufferObjectui64v GetQueryBufferObjectui64v;
 
   OpenglGenerateTextureMipmap GenerateTextureMipmap;
+  OpenglGenerateMipmap GenerateMipmap;
 
   // Platform specific (wgl / glX)
   /* OpenglSwapInterval SwapInterval; */

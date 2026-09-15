@@ -3577,7 +3577,13 @@ InitRenderer2D(renderer_2d *Renderer, heap_allocator *Heap, memory_arena *PermMe
     Renderer->IconTextureArray = CreateTextureArrayFromBitmapBlockArray(&Bitmaps, Dim, CSz("IconTextures"));
 
     GetGL()->BindTexture(GL_TEXTURE_2D_ARRAY, Renderer->IconTextureArray.ID);
-    GetGL()->GenerateTextureMipmap(Renderer->IconTextureArray.ID);
+
+    // NOTE(nsillik)(macos): This was glGenerateTextureMipmap (GL 4.5 /
+    // ARB_direct_state_access), which is absent from the 4.1 core context macOS caps at.
+    // The DSA form differs only by naming the texture rather than relying on the bound
+    // one, and this caller has just bound it, so the core form is equivalent everywhere
+    // and there is nothing to branch on.
+    GetGL()->GenerateMipmap(GL_TEXTURE_2D_ARRAY);
     GetGL()->TexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_NEAREST);
     GetGL()->BindTexture(GL_TEXTURE_2D_ARRAY, 0);
 
