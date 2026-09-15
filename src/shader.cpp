@@ -98,6 +98,11 @@ ValueFromSetting(shader_language_setting ShaderLanguage)
       Result = CSz("#version 330 core\n\n");
     } break;
 
+    case ShaderLanguageSetting_410core:
+    {
+      Result = CSz("#version 410 core\n\n");
+    } break;
+
     case ShaderLanguageSetting_460core:
     {
       Result = CSz("#version 460 core\n\n");
@@ -191,7 +196,16 @@ CompileShaderPair(shader *Shader, cs VertShaderPath, cs FragShaderPath, b32 Dump
   auto Stdlib = GetStdlib();
   auto GL = GetGL();
 
+#if BONSAI_MACOS
+  // NOTE(nsillik)(macos): macOS GL reports 4.10 as its ceiling, and a rejected #version is
+  // fatal -- CheckShaderCompilationStatus calls Error, which traps.  Overridden here, at the
+  // one place a default is chosen, rather than redefining ShaderLanguageSetting_default,
+  // which means 460core everywhere it is named (the settings file, the editor UI, the
+  // string table).
+  if (Stdlib->ShaderHeaderCode.Start == 0) { ReloadShaderHeaderCode(Stdlib, ShaderLanguageSetting_410core); }
+#else
   if (Stdlib->ShaderHeaderCode.Start == 0) { ReloadShaderHeaderCode(Stdlib, ShaderLanguageSetting_default); }
+#endif
 
   ansi_stream VertexShaderCode = ReadEntireFileIntoAnsiStream(VertShaderPath, GetTranArena());
   ansi_stream FragShaderCode   = ReadEntireFileIntoAnsiStream(FragShaderPath, GetTranArena());
