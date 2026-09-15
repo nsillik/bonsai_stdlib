@@ -69,10 +69,85 @@ SetViewport(v2 Dim)
   GetGL()->Viewport(0, 0, (s32)Dim.x, (s32)Dim.y);
 }
 
+// NOTE(nsillik)(macos): The texture unit texture buffers are bound to.  Kept at the top of
+// the range so it cannot collide with the units the uniforms hand out, which start at 0 and
+// increment per sampler; a samplerBuffer counts against the same per-stage limit as a
+// sampler2D.  render_loop.cpp asserts its own sampler units stay below this.
+//
+// Set through glUniform1i rather than `layout(binding = N) uniform samplerBuffer`, which
+// GLSL only accepts from 4.20 (ARB_shading_language_420pack, absent on macOS).
+#define SHADER_TEXTURE_BUFFER_UNIT 15
+
+// NOTE(nsillik)(macos): Stands in for a std430 shader storage buffer on drivers that lack
+// GL 4.3.  The buffer's contents are viewed as GL_RGBA32F texels, so a texel is 16 bytes and
+// the mapped type has to be a multiple of that -- a struct whose members are padded to 16
+// bytes, which both users are (render_matrix_pair is 128, world_edit_op 272).
+struct texture_buffer_binding
+{
+  u32 Texture;
+  u32 Buffer;
+};
+
+link_internal void
+BindTextureBuffer(texture_buffer_binding *Binding, const char *SamplerName, void *Data, umm SizeBytes)
+{
+  auto GL = GetGL();
+
+  Assert(SizeBytes % 16 == 0);
+
+  if (Binding->Buffer == 0)
+  {
+    GL->GenBuffers(1, &Binding->Buffer);
+    GL->GenTextures(1, &Binding->Texture);
+    Assert(Binding->Buffer);
+    Assert(Binding->Texture);
+  }
+
+  GL->BindBuffer(GL_TEXTURE_BUFFER, Binding->Buffer);
+  GL->BufferData(GL_TEXTURE_BUFFER, Cast(GLsizeiptr, SizeBytes), Data, GL_DYNAMIC_DRAW);
+
+  // Only the *binding* is restored at the end of this function: the sampler reads from the
+  // unit recorded in its uniform, so the binding has to outlive the call, and unit 0 has to
+  // be current again for the next BindTexture.
+  GL->ActiveTexture(GL_TEXTURE0 + SHADER_TEXTURE_BUFFER_UNIT);
+  GL->BindTexture(GL_TEXTURE_BUFFER, Binding->Texture);
+  GL->TexBuffer(GL_TEXTURE_BUFFER, GL_RGBA32F, Binding->Buffer);
+
+  GLuint Program = 0;
+  GL->GetIntegerv(GL_CURRENT_PROGRAM, Cast(s32*, &Program));
+  Assert(Program);
+
+  s32 SamplerUniform = GL->GetUniformLocation(Program, SamplerName);
+
+  // NOTE(nsillik): A miss means the shader does not declare the sampler.  That would read
+  // texel 0 of whatever is bound to unit 0 rather than failing, so it must not be silent.
+  Assert(SamplerUniform >= 0);
+
+  GL->Uniform1i(SamplerUniform, SHADER_TEXTURE_BUFFER_UNIT);
+  GL->ActiveTexture(GL_TEXTURE0);
+
+  AssertNoGlErrors;
+}
+
 link_internal b32
 InitializeOpenglFunctions()
 {
   Info("Initializing OpenGL Extensions");
+
+  // NOTE(nsillik)(macos): Every gl* entry point this tree actually calls is loaded and then
+  // ANDed into GetGL()->Initialized, which is what decides whether the context is usable at
+  // all (Assert(InitializeOpenglFunctions()) in initialize.cpp).
+  //
+  // A handful below are loaded without that gate, because a 4.1 core context -- the highest
+  // macOS offers -- does not have them and none of them has a caller:
+  //
+  //   glMultiDrawArraysIndirect (4.3)   glBindTextures (4.4)   glBufferStorage (4.4)
+  //   glDebugMessageCallback    (4.3)   glGenerateTextureMipmap (4.5)
+  //   glGetQueryBufferObject{iv,uiv,i64v,ui64v} (4.5)
+  //
+  // measured on Apple M4 Max / "4.1 Metal - 91.7": those are exactly the symbols the loader
+  // reports as missing.  So they stay loaded (a driver that has them still gets them) but
+  // ungated.  If one is ever called, it needs a fallback or a real gate, not silence.
 
 #if 0
   const char* glxExtensionString = glXQueryExtensionsString(Os->Display, DefaultScreen(Os->Display));
@@ -126,8 +201,8 @@ InitializeOpenglFunctions()
       GetGL()->DrawArraysIndirect        = (OpenglDrawArraysIndirect)PlatformGetGlFunction("glDrawArraysIndirect");
       GetGL()->Initialized               &= GetGL()->DrawArraysIndirect != 0;
 
+      // Ungated: GL 4.3, absent on macOS, no callers (see the list at the top).
       GetGL()->MultiDrawArraysIndirect   = (OpenglMultiDrawArraysIndirect)PlatformGetGlFunction("glMultiDrawArraysIndirect");
-      GetGL()->Initialized               &= GetGL()->MultiDrawArraysIndirect != 0;
 
       GetGL()->Clear                     = (OpenglClear)PlatformGetGlFunction("glClear");
       GetGL()->Initialized               &= GetGL()->Clear != 0;
@@ -142,7 +217,6 @@ InitializeOpenglFunctions()
       GetGL()->Initialized               &= GetGL()->GenTextures != 0;
 
       GetGL()->BindTextures              = (OpenglBindTextures)PlatformGetGlFunction("glBindTextures");
-      GetGL()->Initialized               &= GetGL()->BindTextures != 0;
 
       GetGL()->BindTexture               = (OpenglBindTexture)PlatformGetGlFunction("glBindTexture");
       GetGL()->Initialized               &= GetGL()->BindTexture != 0;
@@ -198,6 +272,9 @@ InitializeOpenglFunctions()
       GetGL()->TexParameteriv            = (OpenglTexParameteriv)PlatformGetGlFunction("glTexParameteriv");
       GetGL()->Initialized               &= GetGL()->TexParameteriv != 0;
 
+      GetGL()->TexBuffer                 = (OpenglTexBuffer)PlatformGetGlFunction("glTexBuffer");
+      GetGL()->Initialized               &= GetGL()->TexBuffer != 0;
+
       GetGL()->CompressedTexImage3D      = (OpenglCompressedTexImage3D)PlatformGetGlFunction("glCompressedTexImage3D");
       GetGL()->Initialized               &= GetGL()->CompressedTexImage3D != 0;
 
@@ -223,7 +300,11 @@ InitializeOpenglFunctions()
       GetGL()->Initialized               &= GetGL()->VertexAttribPointer != 0;
 
       GetGL()->VertexAttribIPointer       = (OpenglVertexAttribIPointer)PlatformGetGlFunction("glVertexAttribIPointer");
-      GetGL()->Initialized               &= GetGL()->VertexAttribPointer != 0;
+      // NOTE(nsillik): This gated VertexAttribPointer's load, not VertexAttribIPointer's, so
+      // a context with the former but not the latter passed.  Nothing exploits that today --
+      // both are GL 3.0, so both are present wherever either is -- but it is not what the
+      // line means.
+      GetGL()->Initialized               &= GetGL()->VertexAttribIPointer != 0;
 
       GetGL()->BindFramebuffer           = (OpenglBindFramebuffer)PlatformGetGlFunction("glBindFramebuffer");
       GetGL()->Initialized               &= GetGL()->BindFramebuffer != 0;
@@ -409,7 +490,6 @@ InitializeOpenglFunctions()
       GetGL()->Initialized               &= GetGL()->BufferSubData != 0;
 
       GetGL()->BufferStorage             = (OpenglBufferStorage)PlatformGetGlFunction("glBufferStorage");
-      GetGL()->Initialized               &= GetGL()->BufferStorage != 0;
 
       GetGL()->MapBuffer                 = (OpenglMapBuffer)PlatformGetGlFunction("glMapBuffer");
       GetGL()->Initialized               &= GetGL()->MapBuffer != 0;
@@ -427,7 +507,6 @@ InitializeOpenglFunctions()
       GetGL()->Initialized               &= GetGL()->GetIntegerv != 0;
 
       GetGL()->DebugMessageCallback      = (OpenglDebugMessageCallback)PlatformGetGlFunction("glDebugMessageCallback");
-      GetGL()->Initialized               &= GetGL()->DebugMessageCallback != 0;
 
       GetGL()->Finish                    = (OpenglFinish)PlatformGetGlFunction("glFinish");
       GetGL()->Initialized               &= GetGL()->Finish != 0;
@@ -472,21 +551,23 @@ InitializeOpenglFunctions()
       GetGL()->GetQueryObjectui64v       = (OpenglGetQueryObjectui64v)PlatformGetGlFunction("glGetQueryObjectui64v");
       GetGL()->Initialized               &= GetGL()->GetQueryObjectui64v != 0;
 
+      // Ungated: GL 4.5, absent on macOS, no callers (see the list at the top).
       GetGL()->GetQueryBufferObjectiv    = (OpenglGetQueryBufferObjectiv)PlatformGetGlFunction("glGetQueryBufferObjectiv");
-      GetGL()->Initialized               &= GetGL()->GetQueryBufferObjectiv != 0;
 
       GetGL()->GetQueryBufferObjectuiv   = (OpenglGetQueryBufferObjectuiv)PlatformGetGlFunction("glGetQueryBufferObjectuiv");
-      GetGL()->Initialized               &= GetGL()->GetQueryBufferObjectuiv != 0;
 
       GetGL()->GetQueryBufferObjecti64v  = (OpenglGetQueryBufferObjecti64v)PlatformGetGlFunction("glGetQueryBufferObjecti64v");
-      GetGL()->Initialized               &= GetGL()->GetQueryBufferObjecti64v != 0;
 
       GetGL()->GetQueryBufferObjectui64v = (OpenglGetQueryBufferObjectui64v)PlatformGetGlFunction("glGetQueryBufferObjectui64v");
-      GetGL()->Initialized               &= GetGL()->GetQueryBufferObjectui64v != 0;
 
 
+      GetGL()->GenerateMipmap            = (OpenglGenerateMipmap)PlatformGetGlFunction("glGenerateMipmap");
+      GetGL()->Initialized               &= GetGL()->GenerateMipmap != 0;
+
+      // Ungated: GL 4.5 / ARB_direct_state_access, absent on macOS, no callers -- the one
+      // site that used it, InitRenderer2D, calls the core glGenerateMipmap on the target it
+      // has already bound.
       GetGL()->GenerateTextureMipmap     = (OpenglGenerateTextureMipmap)PlatformGetGlFunction("glGenerateTextureMipmap");
-      GetGL()->Initialized               &= GetGL()->GenerateTextureMipmap != 0;
 
 
 

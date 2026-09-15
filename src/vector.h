@@ -34,13 +34,24 @@ union v3i
   };
 };
 
-union v3_u8
+union alignas(4) v3_u8
 {
   u8 E[3];
   struct { u8 x; u8 y; u8 z; };
   struct { u8 r; u8 g; u8 b; };
 };
-CAssert(sizeof(v3_u8) == 3);
+// NOTE(nsillik)(macos): 3 would be the natural size, and is what this was.  Apple's
+// Metal-backed GL only fetches vertex attributes on a 4-byte stride: given the tightly packed
+// 3-byte layout it reads each vertex from 4 bytes further on than the last, so every vertex
+// after the first is assembled from the wrong bytes and a chunk mesh renders as scattered
+// slivers.  Measured with a standalone probe over all 57 (first, count) combinations --
+// stride 0 (element size, 3) wrong 57 of 57; stride 4 wrong 0 of 57.  Mesa tolerates both,
+// which is why this only ever showed up on macOS.
+//
+// The fourth byte is padding that nothing reads and the meshers do not write.  It also makes
+// every existing sizeof(v3_u8) mean "4 bytes on the GPU" with no other edit, which is what
+// the allocators, the element-size table and the BufferSubData offsets already divide by.
+CAssert(sizeof(v3_u8) == 4);
 
 union v3
 {
@@ -804,6 +815,9 @@ poof(gen_common_vector(v2))
 
 poof(gen_common_vector(v3))
 #include <generated/gen_common_vector_v3.h>
+
+poof(gen_common_vector(v4))
+#include <generated/gen_common_vector_v4.h>
 
 poof(gen_common_vector(v3i))
 #include <generated/gen_common_vector_v3i.h>
