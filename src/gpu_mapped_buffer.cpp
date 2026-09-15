@@ -455,12 +455,15 @@ SetupVertexAttribsFor_u3d_geo_element_buffer(gpu_element_buffer_handles *Handles
 
     case DataType_v3_u8:
     {
+      // NOTE(nsillik)(macos): the stride cannot be 0 (tightly packed) here.  0 means "element size",
+      // which for 3 GL_BYTEs is 3, and Apple's GL only fetches attributes on a 4-byte stride --
+      // measured, see the NOTE on v3_u8 in vector.h.  sizeof(v3_u8) is 4 for the same reason.
       GetGL()->BindBuffer(GL_ARRAY_BUFFER, Handles->Handles[mesh_VertexHandle]);
-      GetGL()->VertexAttribPointer(VERTEX_POSITION_LAYOUT_LOCATION, 3, GL_BYTE, GL_FALSE, 0, (void*)0);
+      GetGL()->VertexAttribPointer(VERTEX_POSITION_LAYOUT_LOCATION, 3, GL_BYTE, GL_FALSE, sizeof(v3_u8), (void*)0);
       AssertNoGlErrors;
 
       GetGL()->BindBuffer(GL_ARRAY_BUFFER, Handles->Handles[mesh_NormalHandle]);
-      GetGL()->VertexAttribPointer(VERTEX_NORMAL_LAYOUT_LOCATION, 3, GL_BYTE, GL_TRUE, 0, (void*)0);
+      GetGL()->VertexAttribPointer(VERTEX_NORMAL_LAYOUT_LOCATION, 3, GL_BYTE, GL_TRUE, sizeof(v3_u8), (void*)0);
       AssertNoGlErrors;
     } break;
   }

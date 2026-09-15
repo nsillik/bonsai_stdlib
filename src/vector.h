@@ -34,13 +34,24 @@ union v3i
   };
 };
 
-union v3_u8
+union alignas(4) v3_u8
 {
   u8 E[3];
   struct { u8 x; u8 y; u8 z; };
   struct { u8 r; u8 g; u8 b; };
 };
-CAssert(sizeof(v3_u8) == 3);
+// NOTE(nsillik)(macos): 3 bytes would be the natural size, and is what this was originally.  Apple's
+// Metal-backed GL only fetches vertex attributes on a 4-byte stride: with the packed 3-byte layout
+// the driver reads each vertex's bytes from the wrong place (4 bytes apart, not 3), and the layer
+// renders as scattered slivers instead of terrain.  Measured -- see PLAN.md Deviations #24.  The
+// fourth byte is padding; nothing reads it, and the meshers do not write it.
+//
+// Every sizeof(v3_u8) in the tree therefore means "4 bytes on the GPU" and needs no other edit --
+// here and in bonsai_stdlib: gpu_heap_allocator.cpp's capacity and InitGpuHeap divide by it,
+// Mesh.h's DataTypeToElementSize[i] is declared as it, gpu_mapped_buffer.cpp sizes the heaps with
+// it, and render.cpp's BufferSubData offsets are multiples of it.  The one place the padding has to
+// be spelled out is the attribute pointer, which takes an explicit stride.
+CAssert(sizeof(v3_u8) == 4);
 
 union v3
 {
