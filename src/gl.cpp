@@ -126,10 +126,6 @@ InitializeOpenglFunctions()
 {
   Info("Initializing OpenGL Extensions");
 
-  // NOTE(nsillik)(macos): Absent from a 4.1 context and uncalled, so loaded without being ANDed
-  // into Initialized: glMultiDrawArraysIndirect, glBindTextures, glBufferStorage, glDebugMessage-
-  // Callback, glGenerateTextureMipmap, glGetQueryBufferObject*.  A caller needs a fallback.
-
 #if 0
   const char* glxExtensionString = glXQueryExtensionsString(Os->Display, DefaultScreen(Os->Display));
   const char* glExtensionString = (const char*)glGetString(GL_EXTENSIONS);
@@ -182,9 +178,6 @@ InitializeOpenglFunctions()
       GetGL()->DrawArraysIndirect        = (OpenglDrawArraysIndirect)PlatformGetGlFunction("glDrawArraysIndirect");
       GetGL()->Initialized               &= GetGL()->DrawArraysIndirect != 0;
 
-      // Ungated: GL 4.3, absent on macOS, no callers (see the list at the top).
-      GetGL()->MultiDrawArraysIndirect   = (OpenglMultiDrawArraysIndirect)PlatformGetGlFunction("glMultiDrawArraysIndirect");
-
       GetGL()->Clear                     = (OpenglClear)PlatformGetGlFunction("glClear");
       GetGL()->Initialized               &= GetGL()->Clear != 0;
 
@@ -196,8 +189,6 @@ InitializeOpenglFunctions()
 
       GetGL()->GenTextures               = (OpenglGenTextures)PlatformGetGlFunction("glGenTextures");
       GetGL()->Initialized               &= GetGL()->GenTextures != 0;
-
-      GetGL()->BindTextures              = (OpenglBindTextures)PlatformGetGlFunction("glBindTextures");
 
       GetGL()->BindTexture               = (OpenglBindTexture)PlatformGetGlFunction("glBindTexture");
       GetGL()->Initialized               &= GetGL()->BindTexture != 0;
@@ -466,8 +457,6 @@ InitializeOpenglFunctions()
       GetGL()->BufferSubData             = (OpenglBufferSubData)PlatformGetGlFunction("glBufferSubData");
       GetGL()->Initialized               &= GetGL()->BufferSubData != 0;
 
-      GetGL()->BufferStorage             = (OpenglBufferStorage)PlatformGetGlFunction("glBufferStorage");
-
       GetGL()->MapBuffer                 = (OpenglMapBuffer)PlatformGetGlFunction("glMapBuffer");
       GetGL()->Initialized               &= GetGL()->MapBuffer != 0;
 
@@ -482,8 +471,6 @@ InitializeOpenglFunctions()
 
       GetGL()->GetIntegerv               = (OpenglGetIntegerv)PlatformGetGlFunction("glGetIntegerv");
       GetGL()->Initialized               &= GetGL()->GetIntegerv != 0;
-
-      GetGL()->DebugMessageCallback      = (OpenglDebugMessageCallback)PlatformGetGlFunction("glDebugMessageCallback");
 
       GetGL()->Finish                    = (OpenglFinish)PlatformGetGlFunction("glFinish");
       GetGL()->Initialized               &= GetGL()->Finish != 0;
@@ -528,23 +515,8 @@ InitializeOpenglFunctions()
       GetGL()->GetQueryObjectui64v       = (OpenglGetQueryObjectui64v)PlatformGetGlFunction("glGetQueryObjectui64v");
       GetGL()->Initialized               &= GetGL()->GetQueryObjectui64v != 0;
 
-      // Ungated: GL 4.5, absent on macOS, no callers (see the list at the top).
-      GetGL()->GetQueryBufferObjectiv    = (OpenglGetQueryBufferObjectiv)PlatformGetGlFunction("glGetQueryBufferObjectiv");
-
-      GetGL()->GetQueryBufferObjectuiv   = (OpenglGetQueryBufferObjectuiv)PlatformGetGlFunction("glGetQueryBufferObjectuiv");
-
-      GetGL()->GetQueryBufferObjecti64v  = (OpenglGetQueryBufferObjecti64v)PlatformGetGlFunction("glGetQueryBufferObjecti64v");
-
-      GetGL()->GetQueryBufferObjectui64v = (OpenglGetQueryBufferObjectui64v)PlatformGetGlFunction("glGetQueryBufferObjectui64v");
-
-
       GetGL()->GenerateMipmap            = (OpenglGenerateMipmap)PlatformGetGlFunction("glGenerateMipmap");
       GetGL()->Initialized               &= GetGL()->GenerateMipmap != 0;
-
-      // Ungated: GL 4.5, absent on macOS, no callers (see the list at the top).
-      GetGL()->GenerateTextureMipmap     = (OpenglGenerateTextureMipmap)PlatformGetGlFunction("glGenerateTextureMipmap");
-
-
 
       GetGL()->GetIntegerv(GL_MAJOR_VERSION, &GLMajor);
       GetGL()->GetIntegerv(GL_MINOR_VERSION, &GLMinor);
@@ -566,9 +538,6 @@ InitializeOpenglFunctions()
 
   if (GetGL()->Initialized)
   {
-    /* GetGL()->DebugMessageCallback(HandleGlDebugMessage, 0); */
-    /* GetGL()->Enable(GL_DEBUG_OUTPUT_SYNCHRONOUS); */
-
     GetGL()->Enable(GL_DEPTH_TEST);
 
     GetGL()->DepthFunc(GL_LEQUAL);
