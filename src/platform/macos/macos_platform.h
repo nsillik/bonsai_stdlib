@@ -5,24 +5,21 @@
 #include <unistd.h>
 
 // NOTE(nsillik)(macos): The SDK's <MacTypes.h> declares `typedef SInt32 Fract;` and
-// arrives transitively through every Foundation-based header -- Cocoa, AppKit,
-// Foundation, NSWindow.h, NSEvent.h -- and through Carbon.  That is a hard clash
-// with maff.h's `f32 Fract(f32)`: C++ does not let a typedef and a function share a
-// name, so importing AppKit at all fails the build with
+// arrives transitively through every Foundation-based header -- Cocoa, AppKit, NSWindow.h,
+// NSEvent.h -- and through Carbon.  That is a hard clash with maff.h's `f32 Fract(f32)`:
+// C++ does not let a typedef and a function share a name, so importing AppKit at all fails
+// the build with
 //
 //   error: redefinition of 'Fract' as different kind of symbol
 //
-// plus 18 cascading errors across maff.h, noise.h, random.h, perlin.h and
-// entity.cpp.  Renaming the SDK's typedef for the duration of the imports renames
-// it consistently everywhere those headers mention it, and MacTypes.h is
-// include-guarded, so it is never re-processed under the original name: ours is the
-// only Fract in scope from here on.
+// Renaming the SDK's typedef for the duration of the imports renames it everywhere those
+// headers mention it, and MacTypes.h is include-guarded, so it is never re-processed under
+// the original name: ours is the only Fract in scope from here on.
 //
-// The rename has to span *every* import that can pull in MacTypes.h first, not just
-// Cocoa -- whichever one gets there first emits the typedef, and it only gets one
-// chance.  The alternative, renaming our Fract, touches four stdlib headers and a
-// call site in a submodule we do not own, to fix a name that is correct on Linux and
-// Windows.
+// The rename has to span *every* import that can pull in MacTypes.h first, not just Cocoa --
+// whichever one gets there first emits the typedef, and it only gets one chance.  Renaming
+// our Fract instead touches four stdlib headers and every caller, to fix a name that is
+// correct on Linux and Windows.
 #define Fract BonsaiSdkFract
 #import <Cocoa/Cocoa.h>
 #include <Carbon/Carbon.h>
@@ -32,11 +29,6 @@
 // <OpenGL/gl3.h> is deliberately not included: gl.h declares every GL constant this
 // tree uses and loads every entry point through PlatformGetGlFunction.
 #import <OpenGL/OpenGL.h>
-
-// NOTE(nsillik)(macos): Every file in the tree is compiled as Objective-C++ on macOS
-// (PLATFORM_CXX_OPTIONS in scripts/setup_for_cxx.sh), because the engine is one
-// translation unit per target and macos_platform.cpp uses AppKit directly.  There is
-// no separate .mm shim to put this behind.
 
 #define PLATFORM_RUNTIME_LIB_EXTENSION ".dylib"
 
@@ -154,9 +146,8 @@ GetProcFromLib(shared_lib Lib, const char *Name)
 inline u32
 GetCurrentThreadId()
 {
-  // NOTE(nsillik)(macos): pthread_t is a pointer here, so the (u32)pthread_self()
-  // that works on Linux truncates it.  A mach_port_t is a real u32 and is what a
-  // consumer of a thread id wants.
+  // NOTE(nsillik)(macos): A mach_port_t is a real u32, unlike pthread_t, which is a pointer
+  // here, and a u32 is what a consumer of a thread id wants.
   u32 Result = (u32)pthread_mach_thread_np(pthread_self());
   return Result;
 }

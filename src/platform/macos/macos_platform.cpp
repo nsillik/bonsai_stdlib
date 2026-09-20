@@ -67,11 +67,9 @@ UpdateMousePosition(os *Os, platform *Plat, NSEvent *Event)
   return;
 }
 
-// NOTE(nsillik)(macos): The delegate keeps no state: AppKit holds the window's delegate
-// weakly, so anything it stores would have the os/platform lifetime to worry about, and
-// both are already reachable from the stdlib global.  The instance is retained by never
-// being released (this is MRC -- -x objective-c++ without -fobjc-arc), which is all the
-// lifetime it needs.
+// NOTE(nsillik)(macos): The delegate is stateless and retained by never being released
+// (this is MRC -- -x objective-c++ without -fobjc-arc); AppKit holds a window's delegate
+// weakly, so anything it stored would have the os/platform lifetime to worry about.
 @interface BonsaiWindowDelegate : NSObject <NSWindowDelegate>
 @end
 
@@ -157,9 +155,6 @@ OpenAndInitializeWindow(os *Os, platform *Plat, s32 VSyncFrames)
                                                      defer:NO];
   if (!Window) { Error("Unable to create an NSWindow"); return False; }
 
-  // NOTE(nsillik)(macos): The instance is never released, and AppKit holds the window's
-  // delegate weakly, so nothing else would.  It is stateless, so there is no lifetime
-  // question beyond staying alive.
   BonsaiWindowDelegate *Delegate = [[BonsaiWindowDelegate alloc] init];
   [Window setDelegate:Delegate];
   [Window setReleasedWhenClosed:NO];
@@ -394,12 +389,11 @@ BonsaiSwapBuffers(os *Os)
   TIMED_FUNCTION();
 
   // NOTE(nsillik)(macos): The lock is scoped to the flush rather than being held for
-  // the render thread's whole lifetime.  -[NSOpenGLContext update] takes this same
-  // lock internally (measured: a main-thread update blocks until an off-thread holder
-  // releases it), and update may only be called from the main thread, so a lock held
-  // across frames hangs the first window resize.  Holding it here is all the mutual
-  // exclusion the surface needs; the engine's RenderGate/FrameFence protocol already
-  // serializes the render commands themselves.
+  // the render thread's whole lifetime.  -[NSOpenGLContext update] takes this same lock
+  // internally and may only be called from the main thread, so a lock held across frames
+  // hangs the first window resize.  Holding it here is all the mutual exclusion the
+  // surface needs; the engine's RenderGate/FrameFence protocol already serializes the
+  // render commands themselves.
   //
   // The context object goes through a local because -[NSOpenGLContext CGLContextObj]
   // is annotated NS_RETURNS_INNER_POINTER and so reads as nullable, while

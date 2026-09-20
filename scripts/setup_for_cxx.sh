@@ -58,7 +58,6 @@ elif [[ "$Platform" == "macOS" ]] ; then
   # since 10.14, every gl* symbol with it, and -[NSApplication
   # activateIgnoringOtherApps:] since 14.0 -- whose replacement, -[NSApplication
   # activate], is 14.0 and so is not reachable from a macos11 deployment target.
-  # One flag for the whole class beats a -D plus a #pragma in the source.
   PLATFORM_DEFINES="-D BONSAI_MACOS"
 
   # NOTE(nsillik)(macos): -target and not -arch.  The SIMD layer is SSE/AVX-only,
@@ -93,7 +92,8 @@ elif [[ "$Platform" == "macOS" ]] ; then
   # silently disable the hook, so it is not an option.
   #
   # Every entry is a link_weak symbol that *some* target leaves undefined, which turns on
-  # which translation units that target pulls in rather than on the platform:
+  # which translation units that target pulls in rather than on the platform.  A missing
+  # entry is a link error naming the symbol, so the list keeps itself correct.
   #
   #   BindEngineUniform         defined in src/engine/shader.cpp
   #   LaunchWorkerThreads       defined in bonsai_stdlib/src/work_queue.cpp
@@ -102,10 +102,6 @@ elif [[ "$Platform" == "macOS" ]] ; then
   #   EntityUserData{Serialize,Deserialize,EditorUi}, GameEntityUpdate
   #     game-supplied hooks; the loader and the tools implement none of them.
   #   WorkerThread_BeforeSleep  no definition anywhere; its call site null-checks.
-  #
-  # Derived by linking with an empty list and reading ld64's undefined-symbol report over
-  # the whole target set, not by guessing.  The failure mode of a missing entry is a link
-  # error naming the symbol, so the list keeps itself correct.
   #
   # Deliberately not -Wl,-undefined,dynamic_lookup, which disables undefined-symbol
   # checking for the whole link and would turn genuine typos and missing libraries into

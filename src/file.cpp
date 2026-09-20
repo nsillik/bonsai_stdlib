@@ -383,10 +383,7 @@ link_internal void
 FlushStdout()
 {
   // NOTE(nsillik): stdout and stderr are set unbuffered by SetupStdout, but the log.txt
-  // mirror of them is a stdio FILE* and is not, so a trap loses whatever is still in that
-  // buffer.  Measured on a trap from a failed OpenGL init: without this, log.txt ends
-  // mid-line, short of the message that says what failed -- which is where the port's
-  // first attempt lost most of its evidence.
+  // mirror is a buffered stdio stream, so a trap takes whatever is still in it.
   //
   // Win32 writes through WriteFile, which is already unbuffered, so it has nothing to do.
 #if !BONSAI_WIN32

@@ -228,18 +228,15 @@ PlatformCreateThread( thread_main_callback_type ThreadMain, void *Params, s32 Th
   u32 Result = u32(INVALID_THREAD_HANDLE);
   if (Success)
   {
-    // NOTE(nsillik)(macos): pthread_t is a pointer on macOS and an integer on Linux,
-    // so the direct u32 cast that works on Linux does not compile here.  umm is the
-    // codebase's own pointer-sized integer (CAssert(sizeof(umm) == sizeof(void*)) in
-    // primitives.h), so it round-trips the handle on both.
+    // NOTE(nsillik)(macos): pthread_t is a pointer on macOS and an integer on Linux, so
+    // the cast goes through umm -- the codebase's own pointer-sized integer
+    // (CAssert(sizeof(umm) == sizeof(void*)) in primitives.h) -- rather than a direct u32.
     Result = u32((umm)Thread);
   }
 
   return Result;
 }
 
-// NOTE(nsillik): Called unconditionally by the init sequence in initialize.cpp; see
-// the declaration in posix_platform.h.
 b32
 PlatformInitializeAudio(platform *Plat)
 {

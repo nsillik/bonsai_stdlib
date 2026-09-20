@@ -48,14 +48,12 @@ struct audio
 
 link_internal void SleepMs(u32 Ms);
 
-// NOTE(nsillik): Called unconditionally by the init sequence in initialize.cpp, and
-// only Windows has an implementation (win32_audio.cpp, via XAudio2).  Without this
-// declaration both Linux and macOS fail to link.
+// NOTE(nsillik): Called unconditionally by the init sequence in initialize.cpp; only
+// Windows has an implementation (win32_audio.cpp, via XAudio2).
 b32 PlatformInitializeAudio(platform *Plat);
 
 // TODO(nsillik)(posix): Nothing outside win32 defines this, and there is no portable
-// posix equivalent -- sched_setaffinity(2) is Linux-only and commonly fails inside
-// containers anyway.  Report failure rather than pretending the thread was pinned.
+// equivalent -- sched_setaffinity(2) is Linux-only and commonly fails in containers.
 link_internal b32
 PlatformPinCurrentThreadToCore(u32 CoreIndex)
 {

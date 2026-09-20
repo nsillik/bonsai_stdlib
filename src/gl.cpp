@@ -138,16 +138,15 @@ InitializeOpenglFunctions()
   // ANDed into GetGL()->Initialized, which is what decides whether the context is usable at
   // all (Assert(InitializeOpenglFunctions()) in initialize.cpp).
   //
-  // A handful below are loaded without that gate, because a 4.1 core context -- the highest
-  // macOS offers -- does not have them and none of them has a caller:
+  // These are loaded without that gate, because a 4.1 core context -- the highest macOS
+  // offers -- does not have them and none of them has a caller:
   //
   //   glMultiDrawArraysIndirect (4.3)   glBindTextures (4.4)   glBufferStorage (4.4)
   //   glDebugMessageCallback    (4.3)   glGenerateTextureMipmap (4.5)
   //   glGetQueryBufferObject{iv,uiv,i64v,ui64v} (4.5)
   //
-  // measured on Apple M4 Max / "4.1 Metal - 91.7": those are exactly the symbols the loader
-  // reports as missing.  So they stay loaded (a driver that has them still gets them) but
-  // ungated.  If one is ever called, it needs a fallback or a real gate, not silence.
+  // They stay loaded, so a driver that has them still gets them.  If one is ever called it
+  // needs a fallback or a real gate, not silence.
 
 #if 0
   const char* glxExtensionString = glXQueryExtensionsString(Os->Display, DefaultScreen(Os->Display));
@@ -300,10 +299,6 @@ InitializeOpenglFunctions()
       GetGL()->Initialized               &= GetGL()->VertexAttribPointer != 0;
 
       GetGL()->VertexAttribIPointer       = (OpenglVertexAttribIPointer)PlatformGetGlFunction("glVertexAttribIPointer");
-      // NOTE(nsillik): This gated VertexAttribPointer's load, not VertexAttribIPointer's, so
-      // a context with the former but not the latter passed.  Nothing exploits that today --
-      // both are GL 3.0, so both are present wherever either is -- but it is not what the
-      // line means.
       GetGL()->Initialized               &= GetGL()->VertexAttribIPointer != 0;
 
       GetGL()->BindFramebuffer           = (OpenglBindFramebuffer)PlatformGetGlFunction("glBindFramebuffer");
@@ -564,9 +559,7 @@ InitializeOpenglFunctions()
       GetGL()->GenerateMipmap            = (OpenglGenerateMipmap)PlatformGetGlFunction("glGenerateMipmap");
       GetGL()->Initialized               &= GetGL()->GenerateMipmap != 0;
 
-      // Ungated: GL 4.5 / ARB_direct_state_access, absent on macOS, no callers -- the one
-      // site that used it, InitRenderer2D, calls the core glGenerateMipmap on the target it
-      // has already bound.
+      // Ungated: GL 4.5, absent on macOS, no callers (see the list at the top).
       GetGL()->GenerateTextureMipmap     = (OpenglGenerateTextureMipmap)PlatformGetGlFunction("glGenerateTextureMipmap");
 
 

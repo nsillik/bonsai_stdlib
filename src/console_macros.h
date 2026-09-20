@@ -4,8 +4,7 @@ global_variable char TempStdoutFormatStringBuffer[TempStdoutFormatStringBufferSi
 link_internal void
 PrintToStdout(counted_string S);
 
-// NOTE(nsillik): Flushes stdout and the log.txt mirror of it.  Called before a trap, so
-// the tail of the log is not stuck in a buffer a SIGTRAP/SIGSEGV takes with it.
+// NOTE(nsillik): Flushes stdout and the log.txt mirror of it before a trap.
 link_internal void
 FlushStdout();
 
