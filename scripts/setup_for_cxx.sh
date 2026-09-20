@@ -53,14 +53,14 @@ elif [[ "$Platform" == "macOS" ]] ; then
   # -lGL does not resolve on macOS; OpenGL and AppKit ship as frameworks.
   PLATFORM_LINKER_OPTIONS="-framework Cocoa -framework OpenGL"
 
-  # NSOpenGL* and every gl* symbol are deprecated as of 10.14.
   PLATFORM_DEFINES="-D BONSAI_MACOS"
 
   # x86_64: the SIMD layer is SSE/AVX-only, and the -m* flags below are hard errors for arm64.
   # -x objective-c++: the engine is one translation unit and macos_platform.cpp uses AppKit.
   PLATFORM_CXX_OPTIONS="-ggdb -x objective-c++ -target x86_64-apple-macos11"
 
-  # Silences the deliberate cross-compile warning and the 10.14 deprecations.
+  # -Wno-poison-system-directories: cross-targeting fires it on /usr/local/include, by design.
+  # -Wno-deprecated-declarations: NSOpenGL* went in 10.14; the 14.0 replacements need macOS 14.
   PLATFORM_CXX_OPTIONS="$PLATFORM_CXX_OPTIONS -Wno-poison-system-directories -Wno-deprecated-declarations"
 
   SHARED_LIBRARY_FLAGS="-shared -fPIC"
