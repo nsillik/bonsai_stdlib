@@ -59,8 +59,6 @@ UpdateMousePosition(os *Os, platform *Plat, NSEvent *Event)
   return;
 }
 
-// NOTE(nsillik)(macos): Stateless, and retained by never being released (MRC).  AppKit holds a
-// window's delegate weakly, so anything it stored would outlive the os/platform it points at.
 @interface BonsaiWindowDelegate : NSObject <NSWindowDelegate>
 @end
 
@@ -71,8 +69,6 @@ UpdateMousePosition(os *Os, platform *Plat, NSEvent *Event)
   GetStdlib()->Os.ContinueRunning = False;
 }
 
-// NOTE(nsillik)(macos): AppKit runs a tracking loop during a resize drag, so these are delivered
-// while the game loop is not running; the CGL lock is all the render thread shares with them.
 - (void)windowDidResize:(NSNotification *)Notification
 {
   bonsai_stdlib *Stdlib = GetStdlib();
@@ -80,13 +76,9 @@ UpdateMousePosition(os *Os, platform *Plat, NSEvent *Event)
 
   UpdateScreenDimFromBacking(&Stdlib->Os, &Stdlib->Plat);
 
-  // -[NSOpenGLContext update] resizes the drawable to match the view; without it a resized
-  // window shows a scaled copy of the old size indefinitely.
   [Stdlib->Os.GlContext update];
 }
 
-// A display move changes the framebuffer size without changing the window's size in points,
-// so it does not come through windowDidResize.
 - (void)windowDidChangeBackingProperties:(NSNotification *)Notification
 {
   bonsai_stdlib *Stdlib = GetStdlib();
@@ -104,8 +96,6 @@ OpenAndInitializeWindow(os *Os, platform *Plat, s32 VSyncFrames)
   v2i StartingWindowDim = V2i(1920, 1080);
   if (Plat->ScreenDim.x > 0.f && Plat->ScreenDim.y > 0.f) { StartingWindowDim = V2i(Plat->ScreenDim); }
 
-  // A GUI app launched from a terminal is not activated by the window server by
-  // default, so without this the window never takes focus and never gets a menu bar.
   [NSApplication sharedApplication];
   [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
   [NSApp finishLaunching];
@@ -143,15 +133,9 @@ OpenAndInitializeWindow(os *Os, platform *Plat, s32 VSyncFrames)
   [Window setDelegate:Delegate];
   [Window setReleasedWhenClosed:NO];
   [Window setTitle:@"Bonsai"];
-
-  // Without this the window is never sent mouse-moved events, so MouseP only ever
-  // updates while a button is held and nothing in the UI can be hovered.
   [Window setAcceptsMouseMovedEvents:YES];
 
   NSView *View = [Window contentView];
-
-  // NOTE(nsillik)(macos): Set before the context is attached -- the view decides whether the
-  // surface is in points or backing pixels, and afterwards the framebuffer is stuck at half.
   [View setWantsBestResolutionOpenGLSurface:YES];
 
   NSOpenGLContext *GlContext = [[NSOpenGLContext alloc] initWithFormat:PixelFormat shareContext:nil];
@@ -247,27 +231,24 @@ ProcessOsMessages(os *Os, platform *Plat)
         r32 RawDelta = (r32)[Event scrollingDeltaY];
         s32 Delta    = [Event hasPreciseScrollingDeltas] ? s32(RawDelta) : s32(RawDelta * 120.f);
 
-        // Accumulated, not assigned: a trackpad emits several events per drained frame, and
-        // ResetInputForFrameStart zeroes it once a frame.
+        // A scrollwheel/trackpad emits several events per frame, we accumulate them here
         Plat->Input.MouseWheelDelta += Delta;
       } break;
 
       case NSEventTypeFlagsChanged:
       {
-        // NOTE(nsillik)(macos): Modifier keys only arrive here, and modifierFlags is the whole
-        // keyboard's state, so all three fields come from the one snapshot.
+        // All modifiers are handled here, read out of the Flag and set the appropriate fields
         NSEventModifierFlags Flags = [Event modifierFlags];
 
-        SetInputEvent(&Plat->Input.Shift, (Flags & NSEventModifierFlagShift)   != 0);
-        SetInputEvent(&Plat->Input.Ctrl,  (Flags & NSEventModifierFlagControl) != 0);
-        SetInputEvent(&Plat->Input.Alt,   (Flags & NSEventModifierFlagOption)  != 0);
+        SetInputEvent(&Plat->Input.Shift, Flags & NSEventModifierFlagShift);
+        SetInputEvent(&Plat->Input.Ctrl,  Flags & NSEventModifierFlagControl);
+        SetInputEvent(&Plat->Input.Alt,   Flags & NSEventModifierFlagOption);
       } break;
 
       case NSEventTypeKeyDown:
       case NSEventTypeKeyUp:
       {
-        // NOTE(nsillik)(macos): keyCode is a physical HIToolbox code, layout-independent --
-        // the property the X11 keysym switches rely on too.
+        // NOTE(nsillik)(macos): keyCode is a physical HIToolbox code, layout-independent
         input_event *Field = 0;
 
         switch ([Event keyCode])
