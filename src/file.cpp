@@ -128,7 +128,7 @@ FileIsNew(const char *Filepath, s64 *LastTime)
 /* link_internal b32 */
 /* FileIsNew(hot_reloadable_file *File, s64 *LastTime) */
 /* { */
-/*   b32 Result = */ 
+/*   b32 Result = */
 /*   return Result; */
 /* } */
 
@@ -382,8 +382,8 @@ PrintToStdout(cs Output)
 link_internal void
 FlushStdout()
 {
-  // NOTE(nsillik): stdout and stderr are unbuffered (SetupStdout), but the log.txt mirror is a
-  // buffered stdio stream, so a trap takes whatever is still in it.  Win32 writes unbuffered.
+  // stdout and stderr are unbuffered on linux and macOS; it's the buffered
+  // Global_StdoutLogfile.Handle that gets swallowed, especially in asserts
 #if !BONSAI_WIN32
   if (Stdout.Handle) { fflush(Stdout.Handle); }
   if (Global_StdoutLogfile.Handle) { fflush(Global_StdoutLogfile.Handle); }
