@@ -47,6 +47,39 @@ elif [[ "$Platform" == "Windows" ]] ; then
 
   PLATFORM_EXE_EXTENSION=".exe"
   PLATFORM_LIB_EXTENSION=".dll"
+
+elif [[ "$Platform" == "macOS" ]] ; then
+
+  # -lGL does not resolve on macOS; OpenGL and AppKit ship as frameworks.
+  PLATFORM_LINKER_OPTIONS="-framework Cocoa -framework OpenGL"
+
+  PLATFORM_DEFINES="-D BONSAI_MACOS"
+
+  # x86_64: the SIMD layer is SSE/AVX-only, and the -m* flags below are hard errors for arm64.
+  # -x objective-c++: the engine is one translation unit and macos_platform.cpp uses AppKit.
+  PLATFORM_CXX_OPTIONS="-ggdb -x objective-c++ -target x86_64-apple-macos11"
+
+  # -Wno-poison-system-directories: cross-targeting fires it on /usr/local/include, by design.
+  # -Wno-deprecated-declarations: NSOpenGL* went in 10.14; the 14.0 replacements need macOS 14.
+  PLATFORM_CXX_OPTIONS="$PLATFORM_CXX_OPTIONS -Wno-poison-system-directories -Wno-deprecated-declarations"
+
+  SHARED_LIBRARY_FLAGS="-shared -fPIC"
+
+  # link_weak symbols: ld64 fails a main executable on these, and they must stay undefined so the game dylib's definitions bind.
+  PLATFORM_LINKER_OPTIONS="$PLATFORM_LINKER_OPTIONS \
+    -Wl,-U,_BindEngineUniform \
+    -Wl,-U,_EntityUserDataDeserialize \
+    -Wl,-U,_EntityUserDataEditorUi \
+    -Wl,-U,_EntityUserDataSerialize \
+    -Wl,-U,_GameEntityUpdate \
+    -Wl,-U,_LaunchWorkerThreads \
+    -Wl,-U,_WorkerThread_BeforeSleep"
+
+  PLATFORM_EXE_EXTENSION=""
+  PLATFORM_LIB_EXTENSION=".dylib"
+
+  PLATFORM_INCLUDE_DIRS=""
+
 else
   echo "Unsupported Platform ($Platform), exiting." && exit 1
 fi

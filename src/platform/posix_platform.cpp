@@ -228,10 +228,19 @@ PlatformCreateThread( thread_main_callback_type ThreadMain, void *Params, s32 Th
   u32 Result = u32(INVALID_THREAD_HANDLE);
   if (Success)
   {
-    Result = u32(Thread);
+    // NOTE(nsillik)(macos): pthread_t is a pointer on macOS and an integer on Linux, so the cast
+    // goes through umm, the codebase's pointer-sized integer, rather than a direct u32.
+    Result = u32((umm)Thread);
   }
 
   return Result;
+}
+
+b32
+PlatformInitializeAudio(platform *Plat)
+{
+  Warn("PlatformInitializeAudio is not implemented on this platform.");
+  return False;
 }
 
 
@@ -263,6 +272,15 @@ PlatformSetThreadPriority(s32 Priority)
   bonsai_sched_param Param = {};
   Param.sched_priority = Priority;
 
+#if BONSAI_MACOS
+  // NOTE(nsillik)(macos): sched_setscheduler(2) is Linux-only; pthread_setschedparam returns its
+  // error code directly, and SCHED_FIFO needs root here, so rejection is expected.
+  s32 E = pthread_setschedparam(pthread_self(), SCHED_FIFO, &Param);
+  if (E)
+  {
+    Warn("Setting Scheduler for main thread (%s)", strerror(E));
+  }
+#else
   errno = 0;
   s32 E = sched_setscheduler(0, SCHED_FIFO, &Param);
   if (E)
@@ -283,6 +301,7 @@ PlatformSetThreadPriority(s32 Priority)
       InvalidDefaultCase;
     }
   }
+#endif
 
   return;
 }

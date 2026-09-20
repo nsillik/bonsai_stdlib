@@ -69,6 +69,58 @@ SetViewport(v2 Dim)
   GetGL()->Viewport(0, 0, (s32)Dim.x, (s32)Dim.y);
 }
 
+// NOTE(nsillik)(macos): Top of the unit range, clear of the units the uniforms hand out;
+// render_loop.cpp asserts its own stay below.  glUniform1i because layout(binding=) needs 4.20.
+#define SHADER_TEXTURE_BUFFER_UNIT 15
+
+// NOTE(nsillik)(macos): Stands in for a std430 buffer on drivers without GL 4.3.  Contents are
+// viewed as GL_RGBA32F, so the mapped struct has to be a multiple of 16 bytes.
+struct texture_buffer_binding
+{
+  u32 Texture;
+  u32 Buffer;
+};
+
+link_internal void
+BindTextureBuffer(texture_buffer_binding *Binding, const char *SamplerName, void *Data, umm SizeBytes)
+{
+  auto GL = GetGL();
+
+  Assert(SizeBytes % 16 == 0);
+
+  if (Binding->Buffer == 0)
+  {
+    GL->GenBuffers(1, &Binding->Buffer);
+    GL->GenTextures(1, &Binding->Texture);
+    Assert(Binding->Buffer);
+    Assert(Binding->Texture);
+  }
+
+  GL->BindBuffer(GL_TEXTURE_BUFFER, Binding->Buffer);
+  GL->BufferData(GL_TEXTURE_BUFFER, Cast(GLsizeiptr, SizeBytes), Data, GL_DYNAMIC_DRAW);
+
+  // Only the *binding* is restored: the sampler reads from the unit recorded in its uniform,
+  // so the binding outlives this call; unit 0 has to be current again for the next BindTexture.
+  GL->ActiveTexture(GL_TEXTURE0 + SHADER_TEXTURE_BUFFER_UNIT);
+  GL->BindTexture(GL_TEXTURE_BUFFER, Binding->Texture);
+  GL->TexBuffer(GL_TEXTURE_BUFFER, GL_RGBA32F, Binding->Buffer);
+
+  GLuint Program = 0;
+  GL->GetIntegerv(GL_CURRENT_PROGRAM, Cast(s32*, &Program));
+  Assert(Program);
+
+  s32 SamplerUniform = GL->GetUniformLocation(Program, SamplerName);
+
+  // NOTE(nsillik): A miss means the shader does not declare the sampler.  That would read
+  // texel 0 of whatever is bound to unit 0 rather than failing, so it must not be silent.
+  Assert(SamplerUniform >= 0);
+
+  GL->Uniform1i(SamplerUniform, SHADER_TEXTURE_BUFFER_UNIT);
+  GL->ActiveTexture(GL_TEXTURE0);
+
+  AssertNoGlErrors;
+}
+
 link_internal b32
 InitializeOpenglFunctions()
 {
@@ -126,9 +178,6 @@ InitializeOpenglFunctions()
       GetGL()->DrawArraysIndirect        = (OpenglDrawArraysIndirect)PlatformGetGlFunction("glDrawArraysIndirect");
       GetGL()->Initialized               &= GetGL()->DrawArraysIndirect != 0;
 
-      GetGL()->MultiDrawArraysIndirect   = (OpenglMultiDrawArraysIndirect)PlatformGetGlFunction("glMultiDrawArraysIndirect");
-      GetGL()->Initialized               &= GetGL()->MultiDrawArraysIndirect != 0;
-
       GetGL()->Clear                     = (OpenglClear)PlatformGetGlFunction("glClear");
       GetGL()->Initialized               &= GetGL()->Clear != 0;
 
@@ -140,9 +189,6 @@ InitializeOpenglFunctions()
 
       GetGL()->GenTextures               = (OpenglGenTextures)PlatformGetGlFunction("glGenTextures");
       GetGL()->Initialized               &= GetGL()->GenTextures != 0;
-
-      GetGL()->BindTextures              = (OpenglBindTextures)PlatformGetGlFunction("glBindTextures");
-      GetGL()->Initialized               &= GetGL()->BindTextures != 0;
 
       GetGL()->BindTexture               = (OpenglBindTexture)PlatformGetGlFunction("glBindTexture");
       GetGL()->Initialized               &= GetGL()->BindTexture != 0;
@@ -198,6 +244,9 @@ InitializeOpenglFunctions()
       GetGL()->TexParameteriv            = (OpenglTexParameteriv)PlatformGetGlFunction("glTexParameteriv");
       GetGL()->Initialized               &= GetGL()->TexParameteriv != 0;
 
+      GetGL()->TexBuffer                 = (OpenglTexBuffer)PlatformGetGlFunction("glTexBuffer");
+      GetGL()->Initialized               &= GetGL()->TexBuffer != 0;
+
       GetGL()->CompressedTexImage3D      = (OpenglCompressedTexImage3D)PlatformGetGlFunction("glCompressedTexImage3D");
       GetGL()->Initialized               &= GetGL()->CompressedTexImage3D != 0;
 
@@ -223,7 +272,7 @@ InitializeOpenglFunctions()
       GetGL()->Initialized               &= GetGL()->VertexAttribPointer != 0;
 
       GetGL()->VertexAttribIPointer       = (OpenglVertexAttribIPointer)PlatformGetGlFunction("glVertexAttribIPointer");
-      GetGL()->Initialized               &= GetGL()->VertexAttribPointer != 0;
+      GetGL()->Initialized               &= GetGL()->VertexAttribIPointer != 0;
 
       GetGL()->BindFramebuffer           = (OpenglBindFramebuffer)PlatformGetGlFunction("glBindFramebuffer");
       GetGL()->Initialized               &= GetGL()->BindFramebuffer != 0;
@@ -408,9 +457,6 @@ InitializeOpenglFunctions()
       GetGL()->BufferSubData             = (OpenglBufferSubData)PlatformGetGlFunction("glBufferSubData");
       GetGL()->Initialized               &= GetGL()->BufferSubData != 0;
 
-      GetGL()->BufferStorage             = (OpenglBufferStorage)PlatformGetGlFunction("glBufferStorage");
-      GetGL()->Initialized               &= GetGL()->BufferStorage != 0;
-
       GetGL()->MapBuffer                 = (OpenglMapBuffer)PlatformGetGlFunction("glMapBuffer");
       GetGL()->Initialized               &= GetGL()->MapBuffer != 0;
 
@@ -425,9 +471,6 @@ InitializeOpenglFunctions()
 
       GetGL()->GetIntegerv               = (OpenglGetIntegerv)PlatformGetGlFunction("glGetIntegerv");
       GetGL()->Initialized               &= GetGL()->GetIntegerv != 0;
-
-      GetGL()->DebugMessageCallback      = (OpenglDebugMessageCallback)PlatformGetGlFunction("glDebugMessageCallback");
-      GetGL()->Initialized               &= GetGL()->DebugMessageCallback != 0;
 
       GetGL()->Finish                    = (OpenglFinish)PlatformGetGlFunction("glFinish");
       GetGL()->Initialized               &= GetGL()->Finish != 0;
@@ -472,23 +515,8 @@ InitializeOpenglFunctions()
       GetGL()->GetQueryObjectui64v       = (OpenglGetQueryObjectui64v)PlatformGetGlFunction("glGetQueryObjectui64v");
       GetGL()->Initialized               &= GetGL()->GetQueryObjectui64v != 0;
 
-      GetGL()->GetQueryBufferObjectiv    = (OpenglGetQueryBufferObjectiv)PlatformGetGlFunction("glGetQueryBufferObjectiv");
-      GetGL()->Initialized               &= GetGL()->GetQueryBufferObjectiv != 0;
-
-      GetGL()->GetQueryBufferObjectuiv   = (OpenglGetQueryBufferObjectuiv)PlatformGetGlFunction("glGetQueryBufferObjectuiv");
-      GetGL()->Initialized               &= GetGL()->GetQueryBufferObjectuiv != 0;
-
-      GetGL()->GetQueryBufferObjecti64v  = (OpenglGetQueryBufferObjecti64v)PlatformGetGlFunction("glGetQueryBufferObjecti64v");
-      GetGL()->Initialized               &= GetGL()->GetQueryBufferObjecti64v != 0;
-
-      GetGL()->GetQueryBufferObjectui64v = (OpenglGetQueryBufferObjectui64v)PlatformGetGlFunction("glGetQueryBufferObjectui64v");
-      GetGL()->Initialized               &= GetGL()->GetQueryBufferObjectui64v != 0;
-
-
-      GetGL()->GenerateTextureMipmap     = (OpenglGenerateTextureMipmap)PlatformGetGlFunction("glGenerateTextureMipmap");
-      GetGL()->Initialized               &= GetGL()->GenerateTextureMipmap != 0;
-
-
+      GetGL()->GenerateMipmap            = (OpenglGenerateMipmap)PlatformGetGlFunction("glGenerateMipmap");
+      GetGL()->Initialized               &= GetGL()->GenerateMipmap != 0;
 
       GetGL()->GetIntegerv(GL_MAJOR_VERSION, &GLMajor);
       GetGL()->GetIntegerv(GL_MINOR_VERSION, &GLMinor);
@@ -510,9 +538,6 @@ InitializeOpenglFunctions()
 
   if (GetGL()->Initialized)
   {
-    /* GetGL()->DebugMessageCallback(HandleGlDebugMessage, 0); */
-    /* GetGL()->Enable(GL_DEBUG_OUTPUT_SYNCHRONOUS); */
-
     GetGL()->Enable(GL_DEPTH_TEST);
 
     GetGL()->DepthFunc(GL_LEQUAL);

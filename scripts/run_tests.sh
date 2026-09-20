@@ -10,8 +10,10 @@ TESTS_PASSED=0
 # echo "${BASH_SOURCE[0]}"
 # exit 0
 
-if [ "$Platform" == "Linux" ] ; then
-  exe_search_string='./bin/tests/*';
+if [ "$Platform" == "Linux" ] || [ "$Platform" == "macOS" ] ; then
+  # NOTE(nsillik)(macos): clang writes a .dSYM bundle directory beside every binary, so the search
+  # has to be -type f; a ./bin/tests/* glob matches those and fails one suite per binary.
+  exe_search_string='./bin/tests -maxdepth 1 -type f -perm -u+x';
 elif [[ "$Platform" == "Windows" ]] ; then
   # TODO(Jesse): Do we actually need this since switching off VS?  Does clang
   # output pdb files there or something?
@@ -20,7 +22,7 @@ fi
 
 echo $(pwd)
 for test_executable in $(find $exe_search_string); do
-  if $test_executable $COLORFLAG == 0; then
+  if $test_executable $POOF_COLOR_FLAG; then
     TESTS_PASSED=$((TESTS_PASSED+1))
     echo -n ""
   else
@@ -30,7 +32,7 @@ done
 
 if [ "$EXIT_CODE" -eq 0 ]; then
   echo ""
-  echo "All Tests ($TESTES_PASSED) Passed"
+  echo "All Tests ($TESTS_PASSED) Passed"
 elif [ "$EXIT_CODE" -eq 1 ]; then
   echo ""
   echo "$EXIT_CODE Test suite failed. Inspect log for details."

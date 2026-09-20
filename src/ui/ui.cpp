@@ -3577,7 +3577,8 @@ InitRenderer2D(renderer_2d *Renderer, heap_allocator *Heap, memory_arena *PermMe
     Renderer->IconTextureArray = CreateTextureArrayFromBitmapBlockArray(&Bitmaps, Dim, CSz("IconTextures"));
 
     GetGL()->BindTexture(GL_TEXTURE_2D_ARRAY, Renderer->IconTextureArray.ID);
-    GetGL()->GenerateTextureMipmap(Renderer->IconTextureArray.ID);
+
+    GetGL()->GenerateMipmap(GL_TEXTURE_2D_ARRAY);
     GetGL()->TexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_NEAREST);
     GetGL()->BindTexture(GL_TEXTURE_2D_ARRAY, 0);
 

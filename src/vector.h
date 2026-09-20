@@ -34,13 +34,15 @@ union v3i
   };
 };
 
-union v3_u8
+union alignas(4) v3_u8
 {
   u8 E[3];
   struct { u8 x; u8 y; u8 z; };
   struct { u8 r; u8 g; u8 b; };
 };
-CAssert(sizeof(v3_u8) == 3);
+// NOTE(nsillik)(macos): Apple's GL fetches vertex attributes only on a 4-byte stride, so the packed
+// 3-byte layout read every vertex after the first from the wrong bytes.  The fourth byte is padding.
+CAssert(sizeof(v3_u8) == 4);
 
 union v3
 {
@@ -804,6 +806,9 @@ poof(gen_common_vector(v2))
 
 poof(gen_common_vector(v3))
 #include <generated/gen_common_vector_v3.h>
+
+poof(gen_common_vector(v4))
+#include <generated/gen_common_vector_v4.h>
 
 poof(gen_common_vector(v3i))
 #include <generated/gen_common_vector_v3i.h>
