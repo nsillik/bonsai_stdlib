@@ -224,9 +224,8 @@ enum shader_language_setting
   ShaderLanguageSetting_330core, // legacy
   ShaderLanguageSetting_310es,   // web
 
-  // NOTE(nsillik)(macos): The highest version a 4.1 core context accepts, which is the
-  // ceiling macOS GL offers; it does not report 4.60.  Only the macOS default in
-  // CompileShaderPair selects it.
+  // NOTE(nsillik)(macos): The highest version a 4.1 core context accepts; only the macOS default
+  // in CompileShaderPair selects it.
   ShaderLanguageSetting_410core, // macOS
 
   ShaderLanguageSetting_default = ShaderLanguageSetting_460core poof(@string_table_skip),

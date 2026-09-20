@@ -69,19 +69,12 @@ SetViewport(v2 Dim)
   GetGL()->Viewport(0, 0, (s32)Dim.x, (s32)Dim.y);
 }
 
-// NOTE(nsillik)(macos): The texture unit texture buffers are bound to.  Kept at the top of
-// the range so it cannot collide with the units the uniforms hand out, which start at 0 and
-// increment per sampler; a samplerBuffer counts against the same per-stage limit as a
-// sampler2D.  render_loop.cpp asserts its own sampler units stay below this.
-//
-// Set through glUniform1i rather than `layout(binding = N) uniform samplerBuffer`, which
-// GLSL only accepts from 4.20 (ARB_shading_language_420pack, absent on macOS).
+// NOTE(nsillik)(macos): Top of the unit range, clear of the units the uniforms hand out;
+// render_loop.cpp asserts its own stay below.  glUniform1i because layout(binding=) needs 4.20.
 #define SHADER_TEXTURE_BUFFER_UNIT 15
 
-// NOTE(nsillik)(macos): Stands in for a std430 shader storage buffer on drivers that lack
-// GL 4.3.  The buffer's contents are viewed as GL_RGBA32F texels, so a texel is 16 bytes and
-// the mapped type has to be a multiple of that -- a struct whose members are padded to 16
-// bytes, which both users are (render_matrix_pair is 128, world_edit_op 272).
+// NOTE(nsillik)(macos): Stands in for a std430 buffer on drivers without GL 4.3.  Contents are
+// viewed as GL_RGBA32F, so the mapped struct has to be a multiple of 16 bytes.
 struct texture_buffer_binding
 {
   u32 Texture;
@@ -106,9 +99,8 @@ BindTextureBuffer(texture_buffer_binding *Binding, const char *SamplerName, void
   GL->BindBuffer(GL_TEXTURE_BUFFER, Binding->Buffer);
   GL->BufferData(GL_TEXTURE_BUFFER, Cast(GLsizeiptr, SizeBytes), Data, GL_DYNAMIC_DRAW);
 
-  // Only the *binding* is restored at the end of this function: the sampler reads from the
-  // unit recorded in its uniform, so the binding has to outlive the call, and unit 0 has to
-  // be current again for the next BindTexture.
+  // Only the *binding* is restored: the sampler reads from the unit recorded in its uniform,
+  // so the binding outlives this call; unit 0 has to be current again for the next BindTexture.
   GL->ActiveTexture(GL_TEXTURE0 + SHADER_TEXTURE_BUFFER_UNIT);
   GL->BindTexture(GL_TEXTURE_BUFFER, Binding->Texture);
   GL->TexBuffer(GL_TEXTURE_BUFFER, GL_RGBA32F, Binding->Buffer);
@@ -134,19 +126,9 @@ InitializeOpenglFunctions()
 {
   Info("Initializing OpenGL Extensions");
 
-  // NOTE(nsillik)(macos): Every gl* entry point this tree actually calls is loaded and then
-  // ANDed into GetGL()->Initialized, which is what decides whether the context is usable at
-  // all (Assert(InitializeOpenglFunctions()) in initialize.cpp).
-  //
-  // These are loaded without that gate, because a 4.1 core context -- the highest macOS
-  // offers -- does not have them and none of them has a caller:
-  //
-  //   glMultiDrawArraysIndirect (4.3)   glBindTextures (4.4)   glBufferStorage (4.4)
-  //   glDebugMessageCallback    (4.3)   glGenerateTextureMipmap (4.5)
-  //   glGetQueryBufferObject{iv,uiv,i64v,ui64v} (4.5)
-  //
-  // They stay loaded, so a driver that has them still gets them.  If one is ever called it
-  // needs a fallback or a real gate, not silence.
+  // NOTE(nsillik)(macos): Absent from a 4.1 context and uncalled, so loaded without being ANDed
+  // into Initialized: glMultiDrawArraysIndirect, glBindTextures, glBufferStorage, glDebugMessage-
+  // Callback, glGenerateTextureMipmap, glGetQueryBufferObject*.  A caller needs a fallback.
 
 #if 0
   const char* glxExtensionString = glXQueryExtensionsString(Os->Display, DefaultScreen(Os->Display));

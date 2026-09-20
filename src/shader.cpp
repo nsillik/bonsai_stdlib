@@ -197,11 +197,8 @@ CompileShaderPair(shader *Shader, cs VertShaderPath, cs FragShaderPath, b32 Dump
   auto GL = GetGL();
 
 #if BONSAI_MACOS
-  // NOTE(nsillik)(macos): macOS GL reports 4.10 as its ceiling, and a rejected #version is
-  // fatal -- CheckShaderCompilationStatus calls Error, which traps.  Overridden here, at the
-  // one place a default is chosen, rather than redefining ShaderLanguageSetting_default,
-  // which means 460core everywhere it is named (the settings file, the editor UI, the
-  // string table).
+  // NOTE(nsillik)(macos): macOS GL tops out at 4.10 and a rejected #version traps.  Selected here
+  // rather than by redefining ShaderLanguageSetting_default, which means 460core everywhere else.
   if (Stdlib->ShaderHeaderCode.Start == 0) { ReloadShaderHeaderCode(Stdlib, ShaderLanguageSetting_410core); }
 #else
   if (Stdlib->ShaderHeaderCode.Start == 0) { ReloadShaderHeaderCode(Stdlib, ShaderLanguageSetting_default); }

@@ -4,30 +4,15 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-// NOTE(nsillik)(macos): The SDK's <MacTypes.h> declares `typedef SInt32 Fract;` and
-// arrives transitively through every Foundation-based header -- Cocoa, AppKit, NSWindow.h,
-// NSEvent.h -- and through Carbon.  That is a hard clash with maff.h's `f32 Fract(f32)`:
-// C++ does not let a typedef and a function share a name, so importing AppKit at all fails
-// the build with
-//
-//   error: redefinition of 'Fract' as different kind of symbol
-//
-// Renaming the SDK's typedef for the duration of the imports renames it everywhere those
-// headers mention it, and MacTypes.h is include-guarded, so it is never re-processed under
-// the original name: ours is the only Fract in scope from here on.
-//
-// The rename has to span *every* import that can pull in MacTypes.h first, not just Cocoa --
-// whichever one gets there first emits the typedef, and it only gets one chance.  Renaming
-// our Fract instead touches four stdlib headers and every caller, to fix a name that is
-// correct on Linux and Windows.
+// NOTE(nsillik)(macos): <MacTypes.h> declares `typedef SInt32 Fract;`, a hard clash with maff.h's
+// `f32 Fract(f32)`; the rename has to span every import that can reach MacTypes.h first.
 #define Fract BonsaiSdkFract
 #import <Cocoa/Cocoa.h>
 #include <Carbon/Carbon.h>
 #undef Fract
 
-// NOTE(nsillik)(macos): Only for the NSOpenGL* surface that owns the context.
-// <OpenGL/gl3.h> is deliberately not included: gl.h declares every GL constant this
-// tree uses and loads every entry point through PlatformGetGlFunction.
+// NOTE(nsillik)(macos): Only for the NSOpenGL* surface that owns the context.  gl.h declares every
+// GL constant this tree uses and loads every entry point through PlatformGetGlFunction.
 #import <OpenGL/OpenGL.h>
 
 #define PLATFORM_RUNTIME_LIB_EXTENSION ".dylib"
@@ -74,10 +59,8 @@ PlatformGetGlFunction(const char* Name)
 {
   void *Result = dlsym(RTLD_DEFAULT, Name);
 
-  // NOTE(nsillik)(macos): A 4.1 core context genuinely lacks the GL 4.3+ entry
-  // points, and where a missing one is fatal is decided by the `Initialized &= fn !=
-  // 0` gates in gl.cpp -- in one place, for all platforms.  Error() here would trap
-  // on the first absent symbol and hide the rest.
+  // NOTE(nsillik)(macos): Error() would trap on the first symbol a 4.1 context lacks and hide the
+  // rest; which misses are fatal is decided by the `Initialized &=` gates in gl.cpp.
   if (!Result) { Warn("Couldn't load Opengl function (%s)", Name); }
 
   return Result;

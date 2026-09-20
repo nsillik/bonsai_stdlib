@@ -118,10 +118,8 @@
 #define GL_TEXTURE_2D_ARRAY               0x8C1A
 #define GL_TEXTURE_BINDING_2D_ARRAY       0x8C1D
 
-// NOTE(nsillik)(macos): Texture buffer objects.  Core since GL 3.1, so present on the 4.1
-// core context macOS caps at -- unlike the shader storage buffers they stand in for, which
-// are 4.3.  A TBO has no layout rules at all (texel N is bytes [16N, 16N+16)), which is why
-// it can carry a std430 struct read back with texelFetch.
+// NOTE(nsillik)(macos): Core since GL 3.1, unlike the shader storage buffers it stands in for
+// (4.3); a TBO has no layout rules, so texel N is bytes [16N, 16N+16).
 #define GL_TEXTURE_BUFFER                 0x8C2A
 
 

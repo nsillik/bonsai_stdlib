@@ -382,10 +382,8 @@ PrintToStdout(cs Output)
 link_internal void
 FlushStdout()
 {
-  // NOTE(nsillik): stdout and stderr are set unbuffered by SetupStdout, but the log.txt
-  // mirror is a buffered stdio stream, so a trap takes whatever is still in it.
-  //
-  // Win32 writes through WriteFile, which is already unbuffered, so it has nothing to do.
+  // NOTE(nsillik): stdout and stderr are unbuffered (SetupStdout), but the log.txt mirror is a
+  // buffered stdio stream, so a trap takes whatever is still in it.  Win32 writes unbuffered.
 #if !BONSAI_WIN32
   if (Stdout.Handle) { fflush(Stdout.Handle); }
   if (Global_StdoutLogfile.Handle) { fflush(Global_StdoutLogfile.Handle); }

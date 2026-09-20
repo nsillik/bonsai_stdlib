@@ -40,15 +40,8 @@ union alignas(4) v3_u8
   struct { u8 x; u8 y; u8 z; };
   struct { u8 r; u8 g; u8 b; };
 };
-// NOTE(nsillik)(macos): Apple's Metal-backed GL only fetches vertex attributes on a
-// 4-byte stride; given a packed 3-byte layout it reads each vertex from 4 bytes further
-// on than the last, so every vertex after the first is assembled from the wrong bytes
-// and a chunk mesh renders as scattered slivers.
-//
-// The fourth byte is padding that nothing reads and the meshers do not write.  It also
-// makes every existing sizeof(v3_u8) mean "4 bytes on the GPU" with no other edit, which
-// is what the allocators, the element-size table and the BufferSubData offsets already
-// divide by.
+// NOTE(nsillik)(macos): Apple's GL fetches vertex attributes only on a 4-byte stride, so the packed
+// 3-byte layout read every vertex after the first from the wrong bytes.  The fourth byte is padding.
 CAssert(sizeof(v3_u8) == 4);
 
 union v3
